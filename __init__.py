@@ -66,6 +66,7 @@ from .scoring import (
     ScoringResult,
     ScoringUnavailable,
     metrics_from_stats,
+    sanitize_prediction_store,
     score_accuracy,
     score_predictions,
 )
@@ -128,6 +129,7 @@ __all__ = [
     "rewrite_benchmark_report_html",
     "rewrite_summary_html",
     "runner_identity",
+    "sanitize_prediction_store",
     "score_accuracy",
     "score_predictions",
     "summary_paths",

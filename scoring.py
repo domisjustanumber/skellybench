@@ -202,7 +202,7 @@ def score_predictions(
     )
 
 
-def _report_safe_predictions(store: Any) -> dict[str, Any] | None:
+def sanitize_prediction_store(store: Any) -> dict[str, Any] | None:
     """Strip input-only local paths from a prediction store."""
     if not isinstance(store, Mapping):
         return None
@@ -245,6 +245,7 @@ def score_accuracy(
     *,
     annotation_path: str | Path | None = None,
     base_dir: str | Path | None = None,
+    image_ids: Sequence[int] | None = None,
     warn_ap: float = DEFAULT_WARN_AP,
     fail_ap: float = DEFAULT_FAIL_AP,
 ) -> dict[str, Any]:
@@ -256,6 +257,9 @@ def score_accuracy(
     * predictions only -> status becomes ``unavailable`` with a reason;
     * precomputed metrics only -> accepted as provenance;
     * neither -> status becomes ``unavailable``.
+
+    When *image_ids* is supplied, COCO evaluation is restricted to those images so a truncated or
+    drop-last run reports metrics for exactly the images that were predicted.
 
     The returned copy is report-safe: local prediction paths are replaced by filenames.
     """
@@ -284,7 +288,7 @@ def score_accuracy(
         pass_id = str(pass_entry["pass_id"])
         precomputed = pass_entry.get("metrics")
         predictions = pass_entry.get("predictions")
-        pass_entry["predictions"] = _report_safe_predictions(predictions)
+        pass_entry["predictions"] = sanitize_prediction_store(predictions)
 
         if predictions is not None and annotation_available:
             records = _load_records(predictions, base_path)
@@ -294,6 +298,7 @@ def score_accuracy(
                     annotation,
                     max_dets=max_dets,
                     score_threshold=score_threshold,
+                    image_ids=image_ids,
                 )
             except ScoringUnavailable as exc:
                 if precomputed is not None:
@@ -371,6 +376,7 @@ __all__ = [
     "ScoringResult",
     "ScoringUnavailable",
     "metrics_from_stats",
+    "sanitize_prediction_store",
     "score_accuracy",
     "score_predictions",
 ]

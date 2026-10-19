@@ -155,9 +155,12 @@ def detect_software(packages: Sequence[str] = DEFAULT_SOFTWARE_PACKAGES) -> dict
             versions[name] = version(name)
         except PackageNotFoundError:
             versions[name] = "not installed"
+    onnxruntime = versions.get("onnxruntime")
+    if onnxruntime in (None, "not installed"):
+        onnxruntime = versions.get("onnxruntime-gpu", "not installed")
     return {
         "python": platform.python_version(),
-        "onnxruntime": versions.get("onnxruntime", "not installed"),
+        "onnxruntime": onnxruntime or "not installed",
         "numpy": versions.get("numpy", "not installed"),
         "faster_coco_eval": versions.get("faster-coco-eval", "not installed"),
         "packages": versions,
