@@ -214,10 +214,31 @@ def write_benchmark_report(paths: tuple[Path, Path], payload: Mapping[str, Any])
     return json_path, html_path
 
 
+def rewrite_benchmark_report_html(output_root: str | Path) -> int:
+    """Re-render every benchmark report HTML below *output_root*."""
+    from report_core import read_json
+
+    root = Path(output_root)
+    written = 0
+    for report_file in sorted(root.rglob("*.json")) if root.is_dir() else []:
+        payload = read_json(report_file)
+        if not isinstance(payload, dict) or payload.get("kind") != BENCHMARK_REPORT_KIND:
+            continue
+        try:
+            validate_benchmark_report(payload)
+        except Exception:
+            continue
+        html_path = report_file.with_suffix(".html")
+        atomic_write_text(html_path, render_benchmark_report_html(payload))
+        written += 1
+    return written
+
+
 __all__ = [
     "benchmark_report_id",
     "benchmark_report_paths",
     "build_benchmark_report",
     "render_benchmark_report_html",
+    "rewrite_benchmark_report_html",
     "write_benchmark_report",
 ]

@@ -177,9 +177,27 @@ def write_run_summary(
     return json_path, html_path
 
 
+def rewrite_summary_html(output_root: str | Path) -> int:
+    """Re-render every run-summary HTML below *output_root*."""
+    root = Path(output_root)
+    written = 0
+    for summary_file in sorted(root.rglob("benchmark-summary-*.json")) if root.is_dir() else []:
+        payload = read_json(summary_file)
+        if not isinstance(payload, dict) or payload.get("kind") != BENCHMARK_SUMMARY_KIND:
+            continue
+        try:
+            validate_benchmark_summary(payload)
+        except Exception:
+            continue
+        atomic_write_text(summary_file.with_suffix(".html"), render_run_summary_html(payload))
+        written += 1
+    return written
+
+
 __all__ = [
     "build_run_summary",
     "render_run_summary_html",
+    "rewrite_summary_html",
     "summary_paths",
     "write_run_summary",
 ]

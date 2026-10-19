@@ -22,6 +22,7 @@ from .reports import (
     benchmark_report_paths,
     build_benchmark_report,
     render_benchmark_report_html,
+    rewrite_benchmark_report_html,
     write_benchmark_report,
 )
 from .schema import (
@@ -68,7 +69,13 @@ from .scoring import (
     score_accuracy,
     score_predictions,
 )
-from .summary import build_run_summary, render_run_summary_html, summary_paths, write_run_summary
+from .summary import (
+    build_run_summary,
+    render_run_summary_html,
+    rewrite_summary_html,
+    summary_paths,
+    write_run_summary,
+)
 
 __all__ = [
     "ACCURACY_SCENARIO",
@@ -118,6 +125,8 @@ __all__ = [
     "render_benchmark_report_html",
     "render_index_html",
     "render_run_summary_html",
+    "rewrite_benchmark_report_html",
+    "rewrite_summary_html",
     "runner_identity",
     "score_accuracy",
     "score_predictions",
