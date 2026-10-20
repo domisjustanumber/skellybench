@@ -1,483 +1,199 @@
-# Report API and data structures
+# Report API and data structures (schema version 3)
 
-This document describes the public APIs and JSON payloads for model reports, benchmark reports,
-and per-run summaries. The JSON payloads are the source data; each writer also renders a matching
-HTML file.
+This document uses ASD-STE100 Simplified Technical English.
 
-All builders return schema-version-2 dictionaries and validate them before returning. Schema
-version 1 reports remain readable for compatibility. The structures below describe current
-schema-version-2 output.
+The JSON payloads are the source data. HTML pages are rendered from them.
+Examples abbreviate values with `…`.
 
-Examples are structural and may abbreviate nested values; `{}` and placeholder strings stand for
-fully populated objects where the related contract requires fields.
-
-## Shared data structures
-
-### Run
-
-Benchmark reports and run summaries receive the run metadata object:
-
-```json
-{
-  "run_id": "run-20261020-101500",
-  "started_at": "2026-10-20T10:15:00Z",
-  "finished_at": "2026-10-20T10:16:00Z",
-  "command": {"argv": ["python", "benchmark.py"], "display": "python benchmark.py"},
-  "runner": {"user": "operator"},
-  "hardware": {
-    "id": "sha256:<64 lowercase hex characters>",
-    "hardware_id": "sha256:<64 lowercase hex characters>",
-    "os": {"family": "windows", "name": "Windows", "version": "11", "arch": "AMD64"},
-    "cpu": {"model": "CPU model", "arch": "AMD64"},
-    "gpus": []
-  },
-  "libraries": {
-    "python": {"implementation": "CPython", "version": "3.x"},
-    "packages": {"onnxruntime": "1.x"}
-  }
-}
-```
-
-`run_id`, `runner.user`, hardware identity/OS/CPU, the `gpus` array (which may be empty), and
-library identity are required. Hardware can also include `memory: {"total_mb": 32768}` and GPU
-entries with `index`, `id`, `name`, `vendor`, `driver`, and optional `vram_mb`. `command`,
-timestamps, and additional runner fields are provenance metadata.
-
-CUDA-enabled exporter reports can also include
-`libraries.cuda.torch_cuda_build` and `libraries.cuda.cudnn_runtime_version`. The values record the
-CUDA build and cuDNN runtime versions reported by PyTorch. For example, the values can be `"13.0"`
-and `"9.24.0"`. Model, benchmark, and run-summary HTML reports show these values when present.
-
-### Model metadata
-
-Benchmark reports use this model metadata shape:
-
-```json
-{
-  "id": "detector-small",
-  "task": "object-detection",
-  "format": "onnx",
-  "precision": "fp32",
-  "artifact": {
-    "filename": "detector-small.onnx",
-    "sha256": "<64 lowercase hex characters>",
-    "bytes": 123456
-  },
-  "input_signature": {"batch_size": 1, "shapes": [[1, 3, 640, 640]]},
-  "input_signature_id": "sha256:<64 lowercase hex characters>"
-}
-```
-
-The `id`, `task`, `format`, `precision`, artifact filename and SHA-256, `input_signature`, and
-`input_signature_id` are required for benchmark report model metadata. `bytes`, display fields,
-and `metadata` may be included. Model reports use a related but distinct shape, documented below.
-Filenames in reports are basenames, not local paths.
-
-### Performance
-
-Both report families use a throughput performance object:
-
-```json
-{
-  "scenario": "throughput_adaptive",
-  "protocol": {
-    "version": 1,
-    "images": 120,
-    "warmup_passes": 1,
-    "passes": 5,
-    "min_pass_seconds": 1.0,
-    "max_pass_seconds": 30.0,
-    "cpu_threads": 0,
-    "timing_scope": "session",
-    "protocol_id": "stable-protocol-id"
-  },
-  "records": [{
-    "record_id": "cuda/host/GPU-0",
-    "status": "measured",
-    "provider": "cuda",
-    "mode": "host",
-    "timing": {"images_per_second": 200.0, "ms_per_image": 5.0}
-  }],
-  "unavailable": []
-}
-```
-
-`scenario` is `throughput_adaptive` or `accuracy_full_dataset`. Protocol values are validated;
-optional `input_signature_id` and other protocol metadata may also be present. Each record requires
-a unique `record_id`, `status`, provider (`cpu`, `openvino_gpu`, `cuda`, or `tensorrt_rtx`), and
-mode (`device` or `host`). A measured record requires finite `timing.images_per_second` and
-`timing.ms_per_image`; additional finite timing values are allowed. A non-measured record instead
-requires `reason`. `unavailable` entries require `provider` and `reason`. At least one record or
-unavailable entry is required. Performance report data is throughput-only; accuracy belongs in
-model reports.
-
-## Model report
-
-### Build input
+## Typical producer flow
 
 ```python
-build_model_report(
-    *,
-    report_id: str,
-    model: Mapping[str, Any],
-    provenance: Mapping[str, Any],
-    accuracy: Mapping[str, Any] | None = None,
-    performance: Mapping[str, Any] | None = None,
-    environment: Mapping[str, Any] | None = None,
-    tracked_packages: Iterable[str] | None = None,
-    generated_at: datetime | str | None = None,
-) -> dict[str, Any]
+from datetime import UTC, datetime
+from skellybench import (
+    PerformanceProtocol, accuracy_entry, accuracy_protocol, blocks, build_benchmark_report,
+    build_model_report, compare_metrics, encode_columns, make_run_id, read_predictions_file,
+    report_id_for, score_columns, write_benchmark_predictions, write_benchmark_report, write_model_report,
+)
+from skellybench.probes import docker, local
+from skellybench.render import claim_run, render_family, write_run_summary
+
+machine = local.collect(repository=".", lock_file="uv.lock")
+host = blocks.build_host(machine, docker.collect())
+environment = blocks.build_environment(machine, host)
+run_id = make_run_id(host["hostname"], datetime.now(UTC))
+run = blocks.build_run(run_id=run_id, started_at=…, command=machine["command"],
+                       producer=blocks.build_producer(name="my-exporter", version="1.0", git=machine["git"],
+                                                      lock_file_sha256=machine["lock_file_sha256"]))
+claim_run(exports_root, {"run_id": run_id, "command": run["command"], "hostname": host["hostname"]})
+
+# Accuracy: write predictions first, score the stored data, then write the report.
+report_id = report_id_for(subject, "accuracy", execution, run_id)
+reference = write_benchmark_predictions(family_dir, subject_id=subject["subject_id"], report_id=report_id,
+                                        columns=encode_columns(image_ids=…, per_image=300, category_ids=…,
+                                                               bboxes=…, scores=…))
+scored = score_columns(read_predictions_file(family_dir / reference["filename"]), annotation_file)
+report = build_benchmark_report(benchmark_type="accuracy", status="measured", run=run, host=host,
+                                environment=environment, execution=execution, subject=subject, dataset=…,
+                                protocol=accuracy_protocol(batch_size=1, images=5000, evaluation=…),
+                                performance=…, accuracy={"evaluation": …, "metrics": scored.as_metrics_block(),
+                                                         "predictions": reference, "pair": …})
+write_benchmark_report(family_dir, report)
+
+render_family(family_dir)
+write_run_summary(exports_root, {"run_id": run_id, "status": "finished", …})
 ```
 
-The required `model` fields are:
+## Shared blocks
 
-| Field | Structure |
-|---|---|
-| `model_id` | Non-empty model identifier |
-| `runtime` | `onnx`, `rfdetr`, or `other` |
-| `precision` | Non-empty precision label |
-| `batch_size` | Positive integer |
-| `input_signature` | Object describing model inputs |
-
-Optional `model.artifact` can contain `filename`, `sha256`, `source_fp32_sha256`, `size_bytes`, and
-`filesize_human`. Optional `metadata` is an opaque object. `provenance` requires `origin`
-(`python_model`, `onnx_model`, or `other`) and may include `tools`, `config`, `environment`, and
-`source`. A checkpoint `source` uses its upstream `url` and lowercase MD5 `md5`; do not include a
-local checkpoint path.
-
-`accuracy` and `performance` are independently optional, but at least one scoring section must be
-present in the resulting payload. If omitted, `performance` defaults to `{"benchmarks": []}`.
-`environment` defaults to detected hardware and library versions; when supplied, its current
-shape is:
+### `run`
 
 ```json
 {
-  "hardware": {"id": "...", "hardware_id": "...", "os": {}, "cpu": {}, "gpus": []},
-  "libraries": {
-    "python": {"implementation": "CPython", "version": "3.x"},
-    "packages": {},
-    "cuda": {"torch_cuda_build": "13.0", "cudnn_runtime_version": "9.24.0"}
-  }
+  "run_id": "20261020T153239Z-gerald",
+  "started_at": "2026-10-20T15:32:39+00:00",
+  "command": "uv run python export_all.py --sizes nano",
+  "producer": {"name": "roboflow-exporter", "version": "0.1.0", "git_commit": "b34e351…",
+               "git_dirty": false, "git_diff_sha256": null, "lock_file_sha256": "…"}
 }
 ```
 
-`libraries.cuda` is optional. It records the CUDA build and cuDNN runtime versions when the
-exporter detects them.
+`run_id` is `<UTC YYYYMMDDTHHMMSSZ>-<hostname slug>`. The slug is lowercase `[a-z0-9-]`.
 
-`tracked_packages` applies when the environment is detected by the builder. `generated_at` accepts
-an ISO-8601 string or `datetime`; when omitted, the current timestamp is used.
-
-For measured accuracy, `accuracy` has `scenario: "accuracy_full_dataset"`, a valid `device`,
-evaluation settings, exactly two passes (`python` and `onnx`), and a Python-vs-ONNX comparison.
-Both passes must use the selected device; the ONNX pass must match the selected ONNX Runtime
-provider. Each measured pass contains `metrics` or `predictions`. Metrics are `{tool, version,
-values}`. Prediction data is represented by a store descriptor: inline stores contain COCO
-detection `records`; JSON/JSONL stores contain a SHA-256 and record count. Report output does not
-include local prediction paths or raw prediction records. Non-measured accuracy statuses
-(`unavailable`, `skipped`, or `error`) require a `reason`.
-
-### JSON output
+### `host`
 
 ```json
 {
-  "schema_version": 2,
-  "kind": "model_report",
-  "report_id": "detector-small-fp32",
-  "generated_at": "2026-10-20T10:15:00Z",
-  "model": {
-    "model_id": "detector-small",
-    "runtime": "onnx",
-    "precision": "fp32",
-    "batch_size": 1,
-    "input_signature": {"shapes": [[1, 3, 640, 640]]},
-    "artifact": {"filename": "detector-small.onnx", "sha256": "<sha256>"}
-  },
-  "provenance": {"origin": "onnx_model"},
-  "scoring": {
-    "accuracy": {"scenario": "accuracy_full_dataset", "status": "unavailable", "reason": "..."},
-    "performance": {
-      "benchmarks": [{
-        "run_id": "run-20261020-101500",
-        "scenario": "throughput_adaptive",
-        "report_id": "detector-small.onnx.benchmark-run-20261020-101500",
-        "filename": "detector-small.onnx.benchmark-run-20261020-101500.json",
-        "sha256": "<sha256>",
-        "snapshot": {"kind": "benchmark_report", "performance": {"records": []}}
-      }]
-    }
-  },
-  "environment": {
-    "hardware": {"id": "...", "hardware_id": "...", "os": {}, "cpu": {}, "gpus": []},
-    "libraries": {"python": {"implementation": "CPython", "version": "3.x"}, "packages": {}}
-  }
+  "hostname": "Gerald",
+  "os": {"name": "Windows", "version": "10.0.26300", "release": "11", "distribution": "Windows-11-…", "arch": "AMD64"},
+  "virtualization": {"is_wsl": false, "is_container": false, "container_runtime": null, "is_vm": false, "hypervisor": null},
+  "cpu": {"name": "Intel(R) Core(TM) i7-14700K", "short_name": "i7-14700K", "physical_cores": 20, "logical_cores": 28},
+  "memory": {"total_mb": 65244},
+  "gpus": [{"uuid": "GPU-…", "vendor": "nvidia", "pci_bus_id": "00000000:01:00.0", "name": "NVIDIA GeForce RTX 3070",
+            "short_name": "RTX 3070", "driver": "610.88", "vram_mb": 8192}],
+  "container": null,
+  "cuda_device_order": null,
+  "hardware_fingerprint": "sha256:…"
 }
 ```
 
-The `accuracy` section may be absent; `scoring` must contain at least one of `accuracy` or
-`performance`. Each performance benchmark entry requires `run_id`, `scenario`, and throughput-only
-`snapshot`; report id, filename, and hash are optional. Snapshots must not contain accuracy or raw
-prediction data. reports are written as a JSON/HTML pair next to the model artifact, using
-`<artifact-basename>.model.report.json` and `.model.report.html`; the `model_reports` API also
-exposes guarded write and re-render operations.
+In a container, `container` holds `runtime`, `container_id`, `image`, `image_digest`, `base_os`,
+`limits` (`cpu_quota_cores`, `cpuset`, `memory_limit_mb`), `gpu_runtime`, and `host_hostname`.
+
+### `environment`
+
+```json
+{
+  "python": {"implementation": "CPython", "version": "3.14.2", "build": "…", "compiler": "…"},
+  "packages": {"numpy": "2.5.4", "onnxruntime-gpu": "1.31.0", "…": "…"},
+  "package_sources": {"skellybench": {"vcs": "git", "url": "https://github.com/…", "commit": "7eb6bde…"}},
+  "environment_fingerprint": "sha256:…"
+}
+```
+
+`packages` holds every installed distribution. `package_sources` holds only packages that were not
+installed from an index.
+
+### `execution`
+
+```json
+{
+  "runtime": "onnxruntime", "runtime_version": "1.31.0",
+  "provider": {"key": "cuda", "slug": "cuda", "label": "CUDA", "ep_name": "CUDAExecutionProvider", "options": {…}},
+  "device": {"kind": "gpu", "name": "NVIDIA GeForce RTX 3070", "short_name": "RTX 3070",
+             "host_gpu_uuid": "GPU-…", "ep_device_id": 0},
+  "drivers": {"nvidia_driver": "610.88", "loaded_libraries": {"cudnn64_9.dll": "9.24.0"}},
+  "label": "CUDA (RTX 3070)"
+}
+```
+
+`label` is `"<provider label> (<device short name>)"`. Charts use it as the category.
 
 ## Benchmark report
 
-### Build input
-
-```python
-build_benchmark_report(
-    *,
-    run: Mapping[str, Any],
-    model: Mapping[str, Any],
-    performance: Mapping[str, Any],
-    report_id: str | None = None,
-    generated_at: datetime | str | None = None,
-    model_report: Mapping[str, Any] | None = None,
-    provenance: Mapping[str, Any] | None = None,
-) -> dict[str, Any]
-```
-
-`run`, `model`, and `performance` use the shared structures above. `model.artifact.filename` is
-required because it is used to derive the default report id. `report_id` overrides that default.
-`model_report`, when provided, links a model report by `report_id` and may include its JSON
-`filename` and SHA-256. `provenance`, when provided, is an object. `generated_at` accepts an ISO
-timestamp string or `datetime`.
-
-### Example from a real run
-
-This example uses accuracy run `20261020T014403Z-c37089e4-accuracy` and throughput reports from
-the same run. It ran RF-DETR Nano with batch size 1 and both fp32 and fp16 models. The run used
-CUDA device 0 on an NVIDIA GeForce RTX 3070. It evaluated all 5,000 COCO `val2017` images. The run
-used `rfdetr` 1.11.2 and `faster-coco-eval` 1.8.0.
-
-The exporter records the CPU model as `Intel(R) Core(TM) i7-14700K`. It records the PyTorch CUDA
-build as `13.0` and the cuDNN runtime as `9.24.0`.
-
-The input below shows fields from the actual `model` argument for each report. The builder receives
-one model and its own `performance` object per call. The run metadata and performance arguments are
-not shown in full. The example omits hardware fingerprints.
-
-```json
-[
-  {
-    "model": {
-      "id": "rfdetr-nano",
-      "task": "object-detection",
-      "format": "onnx",
-      "precision": "fp32",
-      "artifact": {
-        "filename": "rfdetr-nano_b1_fp32.onnx",
-        "sha256": "68d00b8d1583b02daa385dc91c681c9659760afab7c385a46381725ba6412c6a",
-        "bytes": 107824324
-      },
-      "input_signature": {
-        "batch_size": 1,
-        "shapes": [[1, 3, 384, 384]],
-        "dtype": "float32",
-        "layout": "NCHW",
-        "preprocessing_id": "imagenet_rgb_normalized"
-      },
-      "input_signature_id": "sha256:81772153f578ac742b505a09610aaffc81b43ae3717229ee3dc3d0f6a14dd972"
-    }
-  },
-  {
-    "model": {
-      "id": "rfdetr-nano",
-      "task": "object-detection",
-      "format": "onnx",
-      "precision": "fp16",
-      "artifact": {
-        "filename": "rfdetr-nano_b1_fp16.onnx",
-        "sha256": "f21f896b2a0b375da4e6a1bdc2a051bb019b17fb342cb70c83e24f2be22a508e",
-        "bytes": 54223621
-      },
-      "input_signature": {
-        "batch_size": 1,
-        "shapes": [[1, 3, 384, 384]],
-        "dtype": "float32",
-        "layout": "NCHW",
-        "preprocessing_id": "imagenet_rgb_normalized"
-      },
-      "input_signature_id": "sha256:81772153f578ac742b505a09610aaffc81b43ae3717229ee3dc3d0f6a14dd972"
-    }
-  }
-]
-```
-
-The output below shows measured values from the two reports. The input uses float32 images for both
-models. The `fp16` label describes the model weights, not the input tensor.
-
-| Precision | CUDA device throughput | CUDA device latency | Python AP | ONNX AP |
-|---|---:|---:|---:|---:|
-| fp32 | 129.537 images/s | 7.7198 ms/image | 0.480397 | 0.480287 |
-| fp16 | 128.532 images/s | 7.7802 ms/image | 0.480397 | 0.480230 |
-
-The `run` input used run id `20261020T014403Z-c37089e4-throughput`. It started at
-`2026-10-20T01:44:03.632775+00:00`. The accuracy run ended at `2026-10-20T02:04:42.150587+00:00`.
-The throughput `performance` inputs used these measured CUDA device records:
-
-| Precision | Scenario | Images | Warmup passes | Passes | Provider | Mode | Images/s | ms/image |
-|---|---|---:|---:|---:|---|---|---:|---:|
-| fp32 | throughput_adaptive | 120 | 1 | 5 | cuda | device | 129.537 | 7.7198 |
-| fp16 | throughput_adaptive | 120 | 1 | 5 | cuda | device | 128.532 | 7.7802 |
-
-Each report also contains other provider and mode records.
-
-Each accuracy pass stored 1,500,000 COCO detections in a JSONL file. The report stores each
-prediction file's name, SHA-256, and record count. It does not include the prediction records.
-
-This excerpt shows the fp32 benchmark report output. It omits the full run metadata and other
-provider records. It replaces the machine-specific GPU fingerprint in `record_id` with
-`gpu-0`. The measurement values and other shown fields are from the report.
-
 ```json
 {
-  "schema_version": 2,
-  "kind": "benchmark_report",
-  "report_id": "rfdetr-nano_b1_fp32.onnx.benchmark-20261020T014403Z-c37089e4-throughput",
-  "generated_at": "2026-10-20T01:44:03.667159+00:00",
-  "run": {
-    "run_id": "20261020T014403Z-c37089e4-throughput"
-  },
-  "model": {
-    "id": "rfdetr-nano",
-    "task": "object-detection",
-    "format": "onnx",
-    "precision": "fp32",
-    "artifact": {
-      "filename": "rfdetr-nano_b1_fp32.onnx",
-      "sha256": "68d00b8d1583b02daa385dc91c681c9659760afab7c385a46381725ba6412c6a",
-      "bytes": 107824324
-    },
-    "input_signature": {
-      "batch_size": 1,
-      "shapes": [[1, 3, 384, 384]],
-      "dtype": "float32",
-      "layout": "NCHW",
-      "preprocessing_id": "imagenet_rgb_normalized"
-    },
-    "input_signature_id": "sha256:81772153f578ac742b505a09610aaffc81b43ae3717229ee3dc3d0f6a14dd972"
-  },
-  "performance": {
-    "scenario": "throughput_adaptive",
-    "protocol": {
-      "version": 1,
-      "images": 120,
-      "warmup_passes": 1,
-      "passes": 5,
-      "min_pass_seconds": 1.0,
-      "max_pass_seconds": 30.0,
-      "cpu_threads": 0,
-      "timing_scope": "session",
-      "input_signature_id": "81772153f578ac742b505a09610aaffc81b43ae3717229ee3dc3d0f6a14dd972",
-      "protocol_id": "f09db357871f17c0"
-    },
-    "records": [{
-      "record_id": "cuda/device/gpu-0",
-      "status": "measured",
-      "provider": "cuda",
-      "mode": "device",
-      "timing": {
-        "images_per_second": 129.537,
-        "ms_per_image": 7.7198
-      }
-    }],
-    "unavailable": []
-  },
-  "model_report": {
-    "report_id": "rfdetr-nano_b1_fp32",
-    "filename": "rfdetr-nano_b1_fp32.onnx.model.report.json"
+  "schema_version": 3, "kind": "benchmark_report",
+  "benchmark_type": "accuracy", "status": "measured",
+  "report_id": "rfdetr-nano_b1_fp32.accuracy.cuda.20261020T153239Z-gerald",
+  "generated_at": "…",
+  "run": {…}, "host": {…}, "environment": {…}, "execution": {…},
+  "subject": {"subject_id": "rfdetr-nano_b1_fp32", "model_report_id": "rfdetr-nano_b1_fp32", "model_id": "rfdetr-nano",
+              "format": "onnx", "precision": "fp32", "batch_size": 1, "batch_agnostic": false,
+              "artifact": {"filename": "rfdetr-nano_b1_fp32.onnx", "sha256": "…", "size_bytes": 107824324},
+              "input": {"width": 384, "height": 384}},
+  "dataset": {"name": "coco-val2017", "annotation_sha256": "…", "image_list_sha256": "…",
+              "images_available": 5000, "images_used": 5000, "selection": "all", "limit": null},
+  "protocol": {"benchmark_type": "accuracy", "timing_scope": "end_to_end", "protocol_id": "…", …},
+  "performance": {"records": [{"mode": "host", "timing_scope": "end_to_end", "timing": {"images_per_second": …}}]},
+  "accuracy": {
+    "evaluation": {…},
+    "metrics": {"tool": "faster-coco-eval", "version": "1.8.0", "values": {"ap": …, "ap50": …, …}},
+    "predictions": {"filename": "benchmarks/…/….predictions.json", "file_sha256": "…", "data_sha256": "…",
+                    "format": "coco_detections_columnar_v1", "record_count": 1500000},
+    "pair": {"run_id": "…", "partner_report_id": "…"}
   }
 }
 ```
 
-### JSON output and files
+A performance report has `benchmark_type: "performance"`, no `accuracy` block, and one record per
+mode (`device` or `host`). A report whose `status` is `unavailable` or `error` has a `reason`.
 
-The validated output contains:
-
-```json
-{
-  "schema_version": 2,
-  "kind": "benchmark_report",
-  "report_id": "detector-small.onnx.benchmark-run-20261020-101500",
-  "generated_at": "2026-10-20T10:15:00Z",
-  "run": {"run_id": "run-20261020-101500", "runner": {}, "hardware": {}, "libraries": {}},
-  "model": {"id": "detector-small", "artifact": {"filename": "detector-small.onnx"}},
-  "performance": {"scenario": "throughput_adaptive", "protocol": {}, "records": [], "unavailable": []},
-  "model_report": {"report_id": "detector-small-fp32", "filename": "detector-small-fp32.json"},
-  "provenance": {}
-}
-```
-
-`model_report` and `provenance` are optional. Accuracy is not allowed at the top level or inside
-the performance snapshot. `write_benchmark_report((json_path, html_path), payload)` validates and
-writes both files. The standard path names are
-`<artifact-filename>.benchmark-<run_id>.json` and `.html`.
-
-## Run summary
-
-### Build input
-
-```python
-build_run_summary(
-    *,
-    run: Mapping[str, Any],
-    reports: Sequence[Mapping[str, Any]],
-    report_paths: Mapping[str, Path] | None = None,
-    generated_at: datetime | None = None,
-) -> dict[str, Any]
-```
-
-`run` is the shared run object. `reports` is a sequence of validated benchmark report payloads.
-Optionally, `report_paths` maps each benchmark `report_id` to its JSON `Path`; an existing file is
-hashed and the filename/hash are included in the summary. `generated_at` overrides the timestamp.
-
-`write_run_summary(output_dir, *, run, report_files, generated_at=None)` is the file-based
-alternative: it reads and validates the listed report JSON files, builds the summary, and writes
-the output pair.
-
-### JSON output and files
+## Predictions file
 
 ```json
 {
-  "schema_version": 2,
-  "kind": "benchmark_summary",
-  "run_id": "run-20261020-101500",
-  "generated_at": "2026-10-20T10:16:00Z",
-  "run": {"run_id": "run-20261020-101500", "runner": {}, "hardware": {}, "libraries": {}},
-  "models": [{
-    "model_id": "detector-small",
-    "artifact": {"filename": "detector-small.onnx", "sha256": "<sha256>"},
-    "report": "detector-small.onnx.benchmark-run-20261020-101500.json",
-    "model_report": "detector-small-fp32.json",
-    "performance_status": "measured",
-    "summary": {
-      "images_per_second": 200.0,
-      "record_count": 1,
-      "unavailable_count": 0
-    },
-    "report_sha256": "<sha256>"
-  }],
-  "unavailable": []
+  "schema_version": 3, "kind": "benchmark_predictions", "report_id": "…",
+  "format": "coco_detections_columnar_v1",
+  "image_ids": [139, 285, …], "per_image": 300, "counts": null, "record_count": 1500000,
+  "columns": [{"name": "category_id", "dtype": "uint16"}, {"name": "bbox_xywh", "dtype": "float32", "width": 4},
+              {"name": "score", "dtype": "float32"}],
+  "byte_order": "little", "layout": "column-major", "encoding": "gzip+base64",
+  "data_sha256": "…", "data": "H4sI…"
 }
 ```
 
-There is one `models` entry for each input benchmark report, sorted by model id. `artifact.sha256`,
-`model_report`, and `report_sha256` may be absent when the source data is absent. `performance_status`
-is `measured` when records exist and `unavailable` otherwise. The summary uses the fastest recorded
-`images_per_second`; it reports record and unavailable counts. The top-level `unavailable` list
-combines provider unavailability entries from the reports, keyed by provider. The standard files
-are `benchmark-summary-<run_id>.json` and `benchmark-summary-<run_id>.html`.
+Set `per_image` when every image has the same count. Else set `counts`, one count per image.
 
-## Public validation and write functions
+## Model report
 
-Import these operations from `skellybench`:
+```json
+{
+  "schema_version": 3, "kind": "model_report",
+  "report_id": "rfdetr-nano_b1_fp16", "created_run_id": "20261020T153239Z-gerald", "generated_at": "…",
+  "model": {"model_id": "rfdetr-nano", "display_name": "RF-DETR Nano", "task": "object-detection",
+            "format": "onnx", "precision": "fp16", "batch_size": 1,
+            "variant": {"family": "rfdetr", "size": "nano", "size_rank": 0, "precision": "fp16", "batch_size": 1},
+            "input": {"width": 384, "height": 384}, "outputs": […],
+            "artifact": {"filename": "rfdetr-nano_b1_fp16.onnx", "sha256": "…", "size_bytes": …}, "decode": {…}},
+  "creation": {
+    "run": {…}, "host": {…}, "environment": {…},
+    "source": {"kind": "checkpoint", "filename": "rf-detr-nano.pth", "url": "https://…", "md5": "…", "sha256": "…"},
+    "parent": {"report_id": "rfdetr-nano_b1_fp32", "format": "onnx", "filename": "rfdetr-nano_b1_fp32.onnx", "sha256": "…"},
+    "config_sidecar": null,
+    "steps": [{"step": "fp16_convert", "tool": "onnxconverter-common", "version": "1.16.0",
+               "params": {…}, "repairs": {…}, "input_sha256": "…", "output_sha256": "…"}]
+  },
+  "accuracy": {
+    "self": {"link": {"path": "benchmarks/…json", "sha256": "…"}, "snapshot": {…full benchmark report…}},
+    "parent": {"link": {…}, "snapshot": {…}},
+    "comparison": {"status": "ok", "deltas": {"delta_ap": …, …}, "thresholds": {"warn_ap": 0.001, "fail_ap": 0.01}}
+  }
+}
+```
 
-| Report | Build | Validate | Write |
-|---|---|---|---|
-| Model report | `build_model_report` | `validate_model_report` | `write_model_report` |
-| Benchmark report | `build_benchmark_report` | `validate_benchmark_report` | `write_benchmark_report` |
-| Run summary | `build_run_summary` | `validate_benchmark_summary` | `write_run_summary` |
+`model.variant` lets the family overview group models of any family.
 
-Validation failures raise `ModelReportValidationError` for model reports and
-`SkellybenchValidationError` for benchmark reports and summaries.
+## API
+
+| Function | Module | Purpose |
+|---|---|---|
+| `local.collect()`, `docker.collect()` | `probes` | Probe the machine and the container |
+| `build_run`, `build_producer`, `build_host`, `build_environment`, `build_execution` | `blocks` | Build the shared blocks |
+| `make_run_id`, `benchmark_report_id`, `ep_slug` | `paths` | Names |
+| `PerformanceProtocol`, `accuracy_protocol` | `protocol` | Protocol blocks with stable IDs |
+| `encode_columns`, `columns_from_records`, `read_predictions_file` | `predictions` | Predictions files |
+| `score_columns`, `score_predictions`, `compare_metrics` | `scoring` | COCO metrics and comparisons |
+| `build_benchmark_report`, `write_benchmark_predictions`, `write_benchmark_report` | `reports` | Benchmark reports |
+| `accuracy_entry`, `build_model_report`, `write_model_report`, `supersede_model_report` | `reports` | Model reports |
+| `scan_family`, `read_model_report` | `reports` | Read the reports on disk |
+| `claim_run`, `write_run_summary`, `render_family`, `rebuild_all` | `render` | HTML pages |
