@@ -1,7 +1,13 @@
-"""Schema constants and validation for skellybench inputs and outputs.
+"""Schema version 3: constants and validators for every report skellybench writes.
 
-The package is library-agnostic: it validates and renders plain dictionaries. Scoring is the only
-optional dependency, and it is imported lazily by :mod:`skellybench.scoring`.
+skellybench writes three JSON kinds:
+
+- ``benchmark_report``: one run x subject x benchmark type x execution provider.
+- ``benchmark_predictions``: the columnar predictions of one accuracy benchmark report.
+- ``model_report``: one model artifact, written once when the model is created.
+
+Validators raise :class:`SkellybenchValidationError` with the JSON path of the first problem.
+No report may hold an absolute local path.
 """
 
 from __future__ import annotations
@@ -9,34 +15,25 @@ from __future__ import annotations
 import math
 import re
 from collections.abc import Mapping, Sequence
-from pathlib import Path
+from datetime import datetime
 from typing import Any
 
-SKELLYBENCH_SCHEMA_VERSION = 2
-_LEGACY_SCHEMA_VERSION = 1
-BENCHMARK_PROTOCOL_VERSION = 1
+SCHEMA_VERSION = 3
 
-INPUT_BUNDLE_KIND = "skellybench_run"
 BENCHMARK_REPORT_KIND = "benchmark_report"
-BENCHMARK_SUMMARY_KIND = "benchmark_summary"
-BENCHMARK_OVERVIEW_KIND = "benchmark_overview"
+PREDICTIONS_KIND = "benchmark_predictions"
+MODEL_REPORT_KIND = "model_report"
+REPORT_KINDS = (BENCHMARK_REPORT_KIND, PREDICTIONS_KIND, MODEL_REPORT_KIND)
 
-ACCURACY_SCENARIO = "accuracy_full_dataset"
-THROUGHPUT_SCENARIO = "throughput_adaptive"
-SCENARIOS = (ACCURACY_SCENARIO, THROUGHPUT_SCENARIO)
-
-ACCURACY_STATUSES = ("measured", "skipped", "unavailable", "error")
-PASS_STATUSES = ("measured", "skipped", "unavailable", "error")
-PASS_IDS = ("python", "onnx")
-PASS_ORIGINS = ("python_model", "onnx_model", "other")
-COMPARISON_STATUSES = ("ok", "warn", "fail", "not_available")
-SCORING_MODES = ("recomputed", "precomputed", "unavailable")
-
+ACCURACY = "accuracy"
+PERFORMANCE = "performance"
+BENCHMARK_TYPES = (ACCURACY, PERFORMANCE)
+BENCHMARK_STATUSES = ("measured", "unavailable", "error")
+COMPARISON_STATUSES = ("ok", "warn", "fail")
 MODES = ("device", "host")
 TIMING_SCOPES = ("session", "end_to_end")
-PROVIDER_KEYS = ("cpu", "openvino_gpu", "cuda", "tensorrt_rtx")
+PREDICTIONS_FORMAT = "coco_detections_columnar_v1"
 
-PREDICTION_STORAGES = ("inline", "json", "jsonl")
 COCO_STAT_KEYS = (
     "ap",
     "ap50",
@@ -52,15 +49,21 @@ COCO_STAT_KEYS = (
     "ar_large",
 )
 
+SUBJECT_PATTERN = re.compile(r"^[A-Za-z0-9_-]+$")
+"""A subject (artifact stem or ``<model_id>_source``). No ``.``, because ``.`` separates filename parts."""
+EP_SLUG_PATTERN = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
+HOSTNAME_SLUG_PATTERN = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
+RUN_ID_PATTERN = re.compile(r"^\d{8}T\d{6}Z-[a-z0-9]+(?:-[a-z0-9]+)*$")
 REPORT_ID_PATTERN = re.compile(r"^[A-Za-z0-9._-]+$")
-RUN_ID_PATTERN = REPORT_ID_PATTERN
 SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
+FINGERPRINT_PATTERN = re.compile(r"^sha256:[0-9a-f]{64}$")
 MD5_PATTERN = re.compile(r"^[0-9a-f]{32}$")
-HASH_REF_PATTERN = re.compile(r"^(?:sha256:)?[0-9a-f]{64}$")
+_ABSOLUTE_PATH = re.compile(r"^(?:[A-Za-z]:[\\/]|\\\\|/(?!/))")
+_PATH_KEYS = frozenset({"path", "filename", "file", "local"})
 
 
 class SkellybenchValidationError(ValueError):
-    """Raised when a bundle or report does not satisfy the skellybench schema."""
+    """A report payload does not match schema version 3."""
 
 
 def _error(path: str, message: str) -> SkellybenchValidationError:
@@ -73,28 +76,8 @@ def _mapping(value: Any, path: str) -> Mapping[str, Any]:
     return value
 
 
-def _str(value: Any, path: str) -> str:
-    if not isinstance(value, str) or not value:
-        raise _error(path, "must be a non-empty string")
-    return value
-
-
-def _bool(value: Any, path: str) -> bool:
-    if not isinstance(value, bool):
-        raise _error(path, "must be a boolean")
-    return value
-
-
-def _int(value: Any, path: str, *, minimum: int = 0) -> int:
-    if not isinstance(value, int) or isinstance(value, bool) or value < minimum:
-        raise _error(path, f"must be an integer >= {minimum}")
-    return value
-
-
-def _number(value: Any, path: str) -> float:
-    if not isinstance(value, (int, float)) or isinstance(value, bool) or not math.isfinite(float(value)):
-        raise _error(path, "must be a finite number")
-    return float(value)
+def _optional_mapping(value: Any, path: str) -> Mapping[str, Any] | None:
+    return None if value is None else _mapping(value, path)
 
 
 def _sequence(value: Any, path: str) -> Sequence[Any]:
@@ -103,544 +86,511 @@ def _sequence(value: Any, path: str) -> Sequence[Any]:
     return value
 
 
-def _hash(value: Any, path: str, pattern: re.Pattern[str], label: str) -> str:
+def _str(value: Any, path: str) -> str:
+    if not isinstance(value, str) or not value:
+        raise _error(path, "must be a non-empty string")
+    return value
+
+
+def _optional_str(value: Any, path: str) -> str | None:
+    return None if value is None else _str(value, path)
+
+
+def _int(value: Any, path: str, *, minimum: int = 0) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value < minimum:
+        raise _error(path, f"must be an integer >= {minimum}")
+    return value
+
+
+def _optional_int(value: Any, path: str, *, minimum: int = 0) -> int | None:
+    return None if value is None else _int(value, path, minimum=minimum)
+
+
+def _number(value: Any, path: str) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(float(value)):
+        raise _error(path, "must be a finite number")
+    return float(value)
+
+
+def _bool(value: Any, path: str) -> bool:
+    if not isinstance(value, bool):
+        raise _error(path, "must be a boolean")
+    return value
+
+
+def _optional_bool(value: Any, path: str) -> bool | None:
+    return None if value is None else _bool(value, path)
+
+
+def _pattern(value: Any, path: str, pattern: re.Pattern[str], label: str) -> str:
     text = _str(value, path)
     if not pattern.fullmatch(text):
-        raise _error(path, f"must be a lowercase hex {label}")
+        raise _error(path, f"must be {label}")
     return text
 
 
-def _hash_ref(value: Any, path: str) -> str:
-    text = _str(value, path)
-    if not HASH_REF_PATTERN.fullmatch(text):
-        raise _error(path, "must be a sha256 hash or sha256:<hex> reference")
-    return text
+def _sha256(value: Any, path: str) -> str:
+    return _pattern(value, path, SHA256_PATTERN, "a lowercase hex SHA-256")
 
 
-def _filename(value: Any, path: str) -> str:
-    name = _str(value, path)
-    if Path(name).name != name:
-        raise _error(path, "must be a filename, not a path")
-    return name
+def _optional_sha256(value: Any, path: str) -> str | None:
+    return None if value is None else _sha256(value, path)
+
+
+def _fingerprint(value: Any, path: str) -> str:
+    return _pattern(value, path, FINGERPRINT_PATTERN, "'sha256:' plus 64 lowercase hex characters")
 
 
 def _timestamp(value: Any, path: str) -> str:
     text = _str(value, path)
-    from datetime import datetime
-
     try:
-        datetime.fromisoformat(text)
-    except ValueError as exc:
-        raise _error(path, "must be an ISO-8601 timestamp") from exc
+        datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        raise _error(path, "must be an ISO-8601 timestamp") from None
     return text
 
 
-def validate_prediction_record(record: Any, path: str = "prediction") -> None:
-    """Validate one COCO detection result record."""
-    record_map = _mapping(record, path)
-    _int(record_map.get("image_id"), f"{path}.image_id")
-    _int(record_map.get("category_id"), f"{path}.category_id")
-    bbox = _sequence(record_map.get("bbox"), f"{path}.bbox")
-    if len(bbox) != 4:
-        raise _error(f"{path}.bbox", "must have exactly four numbers")
-    for index, value in enumerate(bbox):
-        _number(value, f"{path}.bbox[{index}]")
-    if float(bbox[2]) < 0 or float(bbox[3]) < 0:
-        raise _error(f"{path}.bbox", "width and height must be non-negative")
-    _number(record_map.get("score"), f"{path}.score")
+def _one_of(value: Any, path: str, choices: Sequence[str]) -> str:
+    if value not in choices:
+        raise _error(path, f"must be one of {list(choices)}")
+    return value
 
 
-def validate_predictions_store(store: Any, path: str = "predictions") -> None:
-    """Validate an inline/JSON/JSONL prediction store without reading it."""
-    store_map = _mapping(store, path)
-    _str(store_map.get("format"), f"{path}.format")
-    storage = _str(store_map.get("storage"), f"{path}.storage")
-    if storage not in PREDICTION_STORAGES:
-        raise _error(f"{path}.storage", f"must be one of {list(PREDICTION_STORAGES)}")
-    if storage == "inline":
-        if "path" in store_map:
-            raise _error(f"{path}.path", "inline predictions must not also point at a file")
-        records = _sequence(store_map.get("records"), f"{path}.records")
-        for index, record in enumerate(records):
-            validate_prediction_record(record, f"{path}.records[{index}]")
-        return
-    if "records" in store_map:
-        raise _error(f"{path}.records", "external predictions must not also embed records")
-    _str(store_map.get("path"), f"{path}.path")
-    _hash(store_map.get("sha256"), f"{path}.sha256", SHA256_PATTERN, "sha256")
-    _int(store_map.get("record_count"), f"{path}.record_count", minimum=0)
+def reject_local_paths(value: Any, path: str = "$") -> None:
+    """Raise when any string value in *value* is an absolute local path.
+
+    URLs and relative paths are allowed. The ``data`` field of a predictions file is not checked.
+    """
+    if isinstance(value, Mapping):
+        for key, item in value.items():
+            if key == "data":
+                continue
+            reject_local_paths(item, f"{path}.{key}")
+    elif isinstance(value, (list, tuple)):
+        for index, item in enumerate(value):
+            reject_local_paths(item, f"{path}[{index}]")
+    elif isinstance(value, str) and _ABSOLUTE_PATH.match(value):
+        raise _error(path, f"must not hold an absolute local path ({value!r})")
 
 
-def validate_metrics(metrics: Any, path: str = "metrics") -> None:
-    """Validate a metrics block and known COCO detection values."""
-    metrics_map = _mapping(metrics, path)
-    _str(metrics_map.get("tool"), f"{path}.tool")
-    _str(metrics_map.get("version"), f"{path}.version")
-    values = _mapping(metrics_map.get("values"), f"{path}.values")
-    for key, value in values.items():
-        _number(value, f"{path}.values.{key}")
+def _header(payload: Any, kind: str) -> Mapping[str, Any]:
+    document = _mapping(payload, "$")
+    if document.get("schema_version") != SCHEMA_VERSION:
+        raise _error("$.schema_version", f"must be {SCHEMA_VERSION}")
+    if document.get("kind") != kind:
+        raise _error("$.kind", f"must be {kind!r}")
+    return document
 
 
-def _validate_device(device: Any) -> str:
-    device_map = _mapping(device, "accuracy.device")
-    device_type = _str(device_map.get("type"), "accuracy.device.type")
-    if device_type not in {"cuda", "cpu"}:
-        raise _error("accuracy.device.type", "must be 'cuda' or 'cpu'")
-    if device_type == "cuda":
-        _int(device_map.get("index"), "accuracy.device.index")
-    torch_device = _str(device_map.get("torch_device"), "accuracy.device.torch_device")
-    _str(device_map.get("ort_provider"), "accuracy.device.ort_provider")
-    if not _bool(device_map.get("matches_internal"), "accuracy.device.matches_internal"):
-        raise _error("accuracy.device.matches_internal", "must be true for apples-to-apples accuracy")
-    _str(device_map.get("selection"), "accuracy.device.selection")
-    internal = _mapping(device_map.get("internal_benchmark"), "accuracy.device.internal_benchmark")
-    _str(internal.get("tool"), "accuracy.device.internal_benchmark.tool")
-    _str(internal.get("device"), "accuracy.device.internal_benchmark.device")
-    _str(internal.get("provider"), "accuracy.device.internal_benchmark.provider")
-    _str(internal.get("selection"), "accuracy.device.internal_benchmark.selection")
-    return torch_device
+# --- shared blocks ---------------------------------------------------------------------------------
 
 
-def _validate_evaluation(evaluation: Any) -> None:
-    evaluation_map = _mapping(evaluation, "accuracy.evaluation")
-    if evaluation_map.get("iou_type") != "bbox":
-        raise _error("accuracy.evaluation.iou_type", "schema v1 supports only 'bbox'")
-    _int(evaluation_map.get("max_dets"), "accuracy.evaluation.max_dets", minimum=1)
-    _number(evaluation_map.get("score_threshold"), "accuracy.evaluation.score_threshold")
-    _int(evaluation_map.get("num_select"), "accuracy.evaluation.num_select", minimum=1)
-    if evaluation_map.get("limit") is not None:
-        _int(evaluation_map["limit"], "accuracy.evaluation.limit", minimum=1)
-    if "images_evaluated" in evaluation_map:
-        _int(evaluation_map["images_evaluated"], "accuracy.evaluation.images_evaluated")
+def validate_run(run: Any, path: str = "run") -> None:
+    """Validate a ``run`` block."""
+    block = _mapping(run, path)
+    _pattern(block.get("run_id"), f"{path}.run_id", RUN_ID_PATTERN, "'<YYYYMMDDTHHMMSSZ>-<hostname slug>'")
+    _timestamp(block.get("started_at"), f"{path}.started_at")
+    if block.get("finished_at") is not None:
+        _timestamp(block["finished_at"], f"{path}.finished_at")
+    _str(block.get("command"), f"{path}.command")
+    producer = _mapping(block.get("producer"), f"{path}.producer")
+    _str(producer.get("name"), f"{path}.producer.name")
+    _optional_str(producer.get("version"), f"{path}.producer.version")
+    _optional_str(producer.get("git_commit"), f"{path}.producer.git_commit")
+    _optional_bool(producer.get("git_dirty"), f"{path}.producer.git_dirty")
+    _optional_sha256(producer.get("git_diff_sha256"), f"{path}.producer.git_diff_sha256")
+    _optional_sha256(producer.get("lock_file_sha256"), f"{path}.producer.lock_file_sha256")
 
 
-def _validate_pass(
-    pass_entry: Any,
-    path: str,
-    *,
-    expected_device: str | None,
-    expected_provider: str | None,
-) -> str:
-    pass_map = _mapping(pass_entry, path)
-    pass_id = _str(pass_map.get("pass_id"), f"{path}.pass_id")
-    if pass_id not in PASS_IDS:
-        raise _error(f"{path}.pass_id", f"must be one of {list(PASS_IDS)}")
-    _str(pass_map.get("producer"), f"{path}.producer")
-    origin = _str(pass_map.get("origin"), f"{path}.origin")
-    if origin not in PASS_ORIGINS:
-        raise _error(f"{path}.origin", f"must be one of {list(PASS_ORIGINS)}")
-    status = _str(pass_map.get("status"), f"{path}.status")
-    if status not in PASS_STATUSES:
-        raise _error(f"{path}.status", f"must be one of {list(PASS_STATUSES)}")
-    provenance = _mapping(pass_map.get("provenance"), f"{path}.provenance")
-    device = _str(provenance.get("device"), f"{path}.provenance.device")
-    if expected_device is not None and device != expected_device:
-        raise _error(f"{path}.provenance.device", f"must match {expected_device!r}")
-    provider = _str(provenance.get("provider"), f"{path}.provenance.provider")
-    if pass_id == "onnx" and expected_provider is not None and provider != expected_provider:
-        raise _error(f"{path}.provenance.provider", f"must match {expected_provider!r}")
-    if status == "measured" and pass_map.get("predictions") is None and pass_map.get("metrics") is None:
-        raise _error(f"{path}", "a measured pass must contain predictions or metrics")
-    if status != "measured":
-        _str(pass_map.get("reason"), f"{path}.reason")
-    if pass_map.get("predictions") is not None:
-        validate_predictions_store(pass_map["predictions"], f"{path}.predictions")
-    if pass_map.get("metrics") is not None:
-        validate_metrics(pass_map["metrics"], f"{path}.metrics")
-    if "timing" in pass_map:
-        _mapping(pass_map["timing"], f"{path}.timing")
-    return pass_id
+def validate_host(host: Any, path: str = "host") -> None:
+    """Validate a ``host`` block."""
+    block = _mapping(host, path)
+    _str(block.get("hostname"), f"{path}.hostname")
+    _mapping(block.get("os"), f"{path}.os")
+    virtualization = _mapping(block.get("virtualization"), f"{path}.virtualization")
+    for key in ("is_wsl", "is_container", "is_vm"):
+        _optional_bool(virtualization.get(key), f"{path}.virtualization.{key}")
+    cpu = _mapping(block.get("cpu"), f"{path}.cpu")
+    _optional_str(cpu.get("name"), f"{path}.cpu.name")
+    for index, gpu in enumerate(_sequence(block.get("gpus"), f"{path}.gpus")):
+        entry = _mapping(gpu, f"{path}.gpus[{index}]")
+        _optional_str(entry.get("name"), f"{path}.gpus[{index}].name")
+        _optional_str(entry.get("uuid"), f"{path}.gpus[{index}].uuid")
+    _optional_mapping(block.get("container"), f"{path}.container")
+    _fingerprint(block.get("hardware_fingerprint"), f"{path}.hardware_fingerprint")
 
 
-def validate_accuracy(accuracy: Any) -> None:
-    """Validate an accuracy block, including the two-pass device contract."""
-    accuracy_map = _mapping(accuracy, "accuracy")
-    if accuracy_map.get("scenario") != ACCURACY_SCENARIO:
-        raise _error("accuracy.scenario", f"must be {ACCURACY_SCENARIO!r}")
-    status = _str(accuracy_map.get("status"), "accuracy.status")
-    if status not in ACCURACY_STATUSES:
-        raise _error("accuracy.status", f"must be one of {list(ACCURACY_STATUSES)}")
-    if "scoring" in accuracy_map:
-        scoring = _str(accuracy_map["scoring"], "accuracy.scoring")
-        if scoring not in SCORING_MODES:
-            raise _error("accuracy.scoring", f"must be one of {list(SCORING_MODES)}")
-    if status != "measured":
-        _str(accuracy_map.get("reason"), "accuracy.reason")
-        if "passes" in accuracy_map:
-            _sequence(accuracy_map["passes"], "accuracy.passes")
-        return
-
-    device = _validate_device(accuracy_map.get("device"))
-    expected_provider = str(_mapping(accuracy_map["device"], "accuracy.device")["ort_provider"])
-    _validate_evaluation(accuracy_map.get("evaluation"))
-    passes = _sequence(accuracy_map.get("passes"), "accuracy.passes")
-    if len(passes) != 2:
-        raise _error("accuracy.passes", "must contain exactly the 'python' and 'onnx' passes")
-    pass_ids = [
-        _validate_pass(
-            pass_entry,
-            f"accuracy.passes[{index}]",
-            expected_device=device,
-            expected_provider=expected_provider,
-        )
-        for index, pass_entry in enumerate(passes)
-    ]
-    if sorted(pass_ids) != sorted(PASS_IDS):
-        raise _error("accuracy.passes", "must contain exactly one 'python' and one 'onnx' pass")
-    if "comparisons" in accuracy_map:
-        _validate_comparisons(accuracy_map["comparisons"])
+def validate_environment(environment: Any, path: str = "environment") -> None:
+    """Validate an ``environment`` block."""
+    block = _mapping(environment, path)
+    python = _mapping(block.get("python"), f"{path}.python")
+    _str(python.get("version"), f"{path}.python.version")
+    packages = _mapping(block.get("packages"), f"{path}.packages")
+    for name, version in packages.items():
+        if not isinstance(name, str) or name != name.lower():
+            raise _error(f"{path}.packages", f"key {name!r} must be a lowercase distribution name")
+        _str(version, f"{path}.packages.{name}")
+    _mapping(block.get("package_sources", {}), f"{path}.package_sources")
+    _fingerprint(block.get("environment_fingerprint"), f"{path}.environment_fingerprint")
 
 
-def _validate_comparisons(comparisons: Any) -> None:
-    for index, comparison in enumerate(_sequence(comparisons, "accuracy.comparisons")):
-        path = f"accuracy.comparisons[{index}]"
-        comparison_map = _mapping(comparison, path)
-        left = _str(comparison_map.get("left_pass"), f"{path}.left_pass")
-        right = _str(comparison_map.get("right_pass"), f"{path}.right_pass")
-        if left not in PASS_IDS or right not in PASS_IDS or left == right:
-            raise _error(path, "must compare two distinct passes from 'python' and 'onnx'")
-        status = _str(comparison_map.get("status"), f"{path}.status")
-        if status not in COMPARISON_STATUSES:
-            raise _error(f"{path}.status", f"must be one of {list(COMPARISON_STATUSES)}")
-        if "deltas" in comparison_map:
-            deltas = _mapping(comparison_map["deltas"], f"{path}.deltas")
-            for key, value in deltas.items():
-                _number(value, f"{path}.deltas.{key}")
+def validate_execution(execution: Any, path: str = "execution") -> None:
+    """Validate an ``execution`` block."""
+    block = _mapping(execution, path)
+    _str(block.get("runtime"), f"{path}.runtime")
+    provider = _mapping(block.get("provider"), f"{path}.provider")
+    _str(provider.get("key"), f"{path}.provider.key")
+    _pattern(provider.get("slug"), f"{path}.provider.slug", EP_SLUG_PATTERN, "a lowercase EP slug")
+    _str(provider.get("ep_name"), f"{path}.provider.ep_name")
+    device = _optional_mapping(block.get("device"), f"{path}.device")
+    if device is not None:
+        _one_of(device.get("kind"), f"{path}.device.kind", ("cpu", "gpu", "npu", "soc"))
+        _optional_str(device.get("name"), f"{path}.device.name")
+        _optional_str(device.get("host_gpu_uuid"), f"{path}.device.host_gpu_uuid")
+    _mapping(block.get("drivers", {}), f"{path}.drivers")
+    _str(block.get("label"), f"{path}.label")
+
+
+def validate_subject(subject: Any, path: str = "subject") -> None:
+    """Validate a benchmark ``subject`` block."""
+    block = _mapping(subject, path)
+    _pattern(block.get("subject_id"), f"{path}.subject_id", SUBJECT_PATTERN, "a subject without '.'")
+    _str(block.get("model_report_id"), f"{path}.model_report_id")
+    _str(block.get("model_id"), f"{path}.model_id")
+    _str(block.get("format"), f"{path}.format")
+    _str(block.get("precision"), f"{path}.precision")
+    _int(block.get("batch_size"), f"{path}.batch_size", minimum=1)
+    _bool(block.get("batch_agnostic"), f"{path}.batch_agnostic")
+    artifact = _mapping(block.get("artifact"), f"{path}.artifact")
+    _str(artifact.get("filename"), f"{path}.artifact.filename")
+    _sha256(artifact.get("sha256"), f"{path}.artifact.sha256")
+    _optional_int(artifact.get("size_bytes"), f"{path}.artifact.size_bytes")
+    validate_input(block.get("input"), f"{path}.input")
+
+
+def validate_input(value: Any, path: str = "input") -> None:
+    """Validate an ``input`` block: image width and height."""
+    block = _mapping(value, path)
+    _int(block.get("width"), f"{path}.width", minimum=1)
+    _int(block.get("height"), f"{path}.height", minimum=1)
+
+
+def validate_dataset(dataset: Any, path: str = "dataset") -> None:
+    """Validate a ``dataset`` block."""
+    block = _mapping(dataset, path)
+    _str(block.get("name"), f"{path}.name")
+    _optional_sha256(block.get("annotation_sha256"), f"{path}.annotation_sha256")
+    _sha256(block.get("image_list_sha256"), f"{path}.image_list_sha256")
+    _optional_int(block.get("images_available"), f"{path}.images_available")
+    _int(block.get("images_used"), f"{path}.images_used", minimum=1)
+    _str(block.get("selection"), f"{path}.selection")
+    _optional_int(block.get("limit"), f"{path}.limit", minimum=1)
 
 
 def validate_protocol(protocol: Any, path: str = "protocol") -> None:
-    """Validate a throughput protocol block."""
-    protocol_map = _mapping(protocol, path)
-    version = _int(protocol_map.get("version"), f"{path}.version", minimum=1)
-    if version != BENCHMARK_PROTOCOL_VERSION:
-        raise _error(f"{path}.version", f"must be {BENCHMARK_PROTOCOL_VERSION}")
-    for key in ("images", "warmup_passes", "passes", "cpu_threads"):
-        _int(protocol_map.get(key), f"{path}.{key}")
-    for key in ("min_pass_seconds", "max_pass_seconds"):
-        value = _number(protocol_map.get(key), f"{path}.{key}")
-        if value < 0:
-            raise _error(f"{path}.{key}", "must be non-negative")
-    timing_scope = _str(protocol_map.get("timing_scope"), f"{path}.timing_scope")
-    if timing_scope not in TIMING_SCOPES:
-        raise _error(f"{path}.timing_scope", f"must be one of {list(TIMING_SCOPES)}")
-    _str(protocol_map.get("protocol_id"), f"{path}.protocol_id")
+    """Validate a ``protocol`` block. It must carry a ``protocol_id``."""
+    block = _mapping(protocol, path)
+    _str(block.get("protocol_id"), f"{path}.protocol_id")
+    _one_of(block.get("benchmark_type"), f"{path}.benchmark_type", BENCHMARK_TYPES)
+    _one_of(block.get("timing_scope"), f"{path}.timing_scope", TIMING_SCOPES)
 
 
-def _validate_performance_record(record: Any, path: str) -> str:
-    record_map = _mapping(record, path)
-    record_id = _str(record_map.get("record_id"), f"{path}.record_id")
-    status = _str(record_map.get("status"), f"{path}.status")
-    if status not in PASS_STATUSES:
-        raise _error(f"{path}.status", f"must be one of {list(PASS_STATUSES)}")
-    provider = _str(record_map.get("provider"), f"{path}.provider")
-    if provider not in PROVIDER_KEYS:
-        raise _error(f"{path}.provider", f"must be one of {list(PROVIDER_KEYS)}")
-    mode = _str(record_map.get("mode"), f"{path}.mode")
-    if mode not in MODES:
-        raise _error(f"{path}.mode", f"must be one of {list(MODES)}")
-    if status == "measured":
-        timing = _mapping(record_map.get("timing"), f"{path}.timing")
-        _number(timing.get("images_per_second"), f"{path}.timing.images_per_second")
-        _number(timing.get("ms_per_image"), f"{path}.timing.ms_per_image")
-        for key, value in timing.items():
-            if isinstance(value, list):
-                for index, item in enumerate(value):
-                    _number(item, f"{path}.timing.{key}[{index}]")
-            else:
-                _number(value, f"{path}.timing.{key}")
-    else:
-        _str(record_map.get("reason"), f"{path}.reason")
-    if "comparison_key" in record_map:
-        _hash_ref(record_map["comparison_key"], f"{path}.comparison_key")
-    return record_id
+def validate_metrics(metrics: Any, path: str = "metrics") -> None:
+    """Validate a COCO ``metrics`` block."""
+    block = _mapping(metrics, path)
+    _str(block.get("tool"), f"{path}.tool")
+    _optional_str(block.get("version"), f"{path}.version")
+    values = _mapping(block.get("values"), f"{path}.values")
+    for key in COCO_STAT_KEYS:
+        if key not in values:
+            raise _error(f"{path}.values", f"missing {key!r}")
+        _number(values[key], f"{path}.values.{key}")
 
 
-def validate_performance(performance: Any) -> None:
-    """Validate a throughput-only performance block."""
-    performance_map = _mapping(performance, "performance")
-    scenario = _str(performance_map.get("scenario"), "performance.scenario")
-    if scenario not in SCENARIOS:
-        raise _error("performance.scenario", f"must be one of {list(SCENARIOS)}")
-    validate_protocol(performance_map.get("protocol"))
-    records = _sequence(performance_map.get("records"), "performance.records")
-    record_ids: set[str] = set()
+def validate_predictions_reference(reference: Any, path: str = "predictions") -> None:
+    """Validate the reference to a predictions file inside an accuracy block."""
+    block = _mapping(reference, path)
+    _str(block.get("filename"), f"{path}.filename")
+    _sha256(block.get("file_sha256"), f"{path}.file_sha256")
+    _sha256(block.get("data_sha256"), f"{path}.data_sha256")
+    _one_of(block.get("format"), f"{path}.format", (PREDICTIONS_FORMAT,))
+    _int(block.get("record_count"), f"{path}.record_count")
+
+
+def validate_comparison(comparison: Any, path: str = "comparison") -> None:
+    """Validate a self-vs-parent ``comparison`` block."""
+    block = _mapping(comparison, path)
+    _one_of(block.get("status"), f"{path}.status", COMPARISON_STATUSES)
+    deltas = _mapping(block.get("deltas"), f"{path}.deltas")
+    for key, value in deltas.items():
+        _number(value, f"{path}.deltas.{key}")
+    thresholds = _mapping(block.get("thresholds"), f"{path}.thresholds")
+    _number(thresholds.get("warn_ap"), f"{path}.thresholds.warn_ap")
+    _number(thresholds.get("fail_ap"), f"{path}.thresholds.fail_ap")
+
+
+# --- benchmark report ------------------------------------------------------------------------------
+
+
+def _validate_performance(performance: Any, path: str = "performance") -> None:
+    block = _mapping(performance, path)
+    records = _sequence(block.get("records"), f"{path}.records")
     for index, record in enumerate(records):
-        record_id = _validate_performance_record(record, f"performance.records[{index}]")
-        if record_id in record_ids:
-            raise _error(f"performance.records[{index}].record_id", "must be unique")
-        record_ids.add(record_id)
-    unavailable = _sequence(performance_map.get("unavailable"), "performance.unavailable")
-    for index, item in enumerate(unavailable):
-        item_map = _mapping(item, f"performance.unavailable[{index}]")
-        _str(item_map.get("provider"), f"performance.unavailable[{index}].provider")
-        _str(item_map.get("reason"), f"performance.unavailable[{index}].reason")
-    if not records and not unavailable:
-        raise _error("performance", "must contain a timing record or an unavailable entry")
+        entry_path = f"{path}.records[{index}]"
+        entry = _mapping(record, entry_path)
+        _one_of(entry.get("mode"), f"{entry_path}.mode", MODES)
+        _one_of(entry.get("timing_scope"), f"{entry_path}.timing_scope", TIMING_SCOPES)
+        timing = _mapping(entry.get("timing"), f"{entry_path}.timing")
+        _number(timing.get("images_per_second"), f"{entry_path}.timing.images_per_second")
+    for index, item in enumerate(_sequence(block.get("unavailable", []), f"{path}.unavailable")):
+        entry = _mapping(item, f"{path}.unavailable[{index}]")
+        _str(entry.get("reason"), f"{path}.unavailable[{index}].reason")
 
 
-def _validate_model_metadata(model: Any) -> None:
-    model_map = _mapping(model, "model")
-    _str(model_map.get("id"), "model.id")
-    _str(model_map.get("task"), "model.task")
-    _str(model_map.get("format"), "model.format")
-    _str(model_map.get("precision"), "model.precision")
-    artifact = _mapping(model_map.get("artifact"), "model.artifact")
-    _filename(artifact.get("filename"), "model.artifact.filename")
-    _hash(artifact.get("sha256"), "model.artifact.sha256", SHA256_PATTERN, "sha256")
-    if "bytes" in artifact:
-        _int(artifact["bytes"], "model.artifact.bytes")
-    signature = _mapping(model_map.get("input_signature"), "model.input_signature")
-    _hash_ref(model_map.get("input_signature_id"), "model.input_signature_id")
-    if "batch_size" in signature:
-        _int(signature["batch_size"], "model.input_signature.batch_size", minimum=1)
-    if "shapes" in signature:
-        for index, shape in enumerate(_sequence(signature["shapes"], "model.input_signature.shapes")):
-            for dimension_index, dimension in enumerate(
-                _sequence(shape, f"model.input_signature.shapes[{index}]")
-            ):
-                _int(
-                    dimension,
-                    f"model.input_signature.shapes[{index}][{dimension_index}]",
-                    minimum=1,
-                )
-    if "metadata" in model_map:
-        _mapping(model_map["metadata"], "model.metadata")
-
-
-def validate_hardware(hardware: Any, path: str = "hardware") -> None:
-    """Validate the standard hardware identity shared by all skellybench reports."""
-    hardware_map = _mapping(hardware, path)
-    _str(hardware_map.get("id"), f"{path}.id")
-    _str(hardware_map.get("hardware_id"), f"{path}.hardware_id")
-    os_info = _mapping(hardware_map.get("os"), f"{path}.os")
-    for key in ("family", "name", "version", "arch"):
-        _str(os_info.get(key), f"{path}.os.{key}")
-    cpu = _mapping(hardware_map.get("cpu"), f"{path}.cpu")
-    _str(cpu.get("model"), f"{path}.cpu.model")
-    _str(cpu.get("arch"), f"{path}.cpu.arch")
-    for key in ("physical_cores", "logical_cores"):
-        if key in cpu and cpu[key] is not None:
-            _int(cpu[key], f"{path}.cpu.{key}", minimum=1)
-    if "memory" in hardware_map:
-        memory = _mapping(hardware_map["memory"], f"{path}.memory")
-        _int(memory.get("total_mb"), f"{path}.memory.total_mb", minimum=1)
-    gpus = _sequence(hardware_map.get("gpus"), f"{path}.gpus")
-    for index, gpu in enumerate(gpus):
-        gpu_path = f"{path}.gpus[{index}]"
-        gpu_map = _mapping(gpu, gpu_path)
-        _int(gpu_map.get("index"), f"{gpu_path}.index")
-        _str(gpu_map.get("id"), f"{gpu_path}.id")
-        _str(gpu_map.get("name"), f"{gpu_path}.name")
-        _str(gpu_map.get("vendor"), f"{gpu_path}.vendor")
-        _str(gpu_map.get("driver"), f"{gpu_path}.driver")
-        if gpu_map.get("vram_mb") is not None:
-            _int(gpu_map["vram_mb"], f"{gpu_path}.vram_mb", minimum=1)
-
-
-def validate_libraries(libraries: Any, path: str = "libraries") -> None:
-    """Validate Python and distribution versions in the standard format."""
-    libraries_map = _mapping(libraries, path)
-    python = _mapping(libraries_map.get("python"), f"{path}.python")
-    _str(python.get("implementation"), f"{path}.python.implementation")
-    _str(python.get("version"), f"{path}.python.version")
-    packages = _mapping(libraries_map.get("packages"), f"{path}.packages")
-    for name, value in packages.items():
-        package_name = _str(name, f"{path}.packages key")
-        if not re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", package_name):
-            raise _error(
-                f"{path}.packages key",
-                "must use a lowercase normalized distribution name",
-            )
-        _str(value, f"{path}.packages.{name}")
-    if "cuda" in libraries_map:
-        cuda = _mapping(libraries_map["cuda"], f"{path}.cuda")
-        for name in ("torch_cuda_build", "cudnn_runtime_version"):
-            if name in cuda:
-                _str(cuda[name], f"{path}.cuda.{name}")
-
-
-def _validate_run(run: Any, *, schema_version: int = SKELLYBENCH_SCHEMA_VERSION) -> None:
-    run_map = _mapping(run, "run")
-    run_id = _str(run_map.get("run_id"), "run.run_id")
-    if not RUN_ID_PATTERN.fullmatch(run_id):
-        raise _error("run.run_id", "must be Windows-safe (letters, digits, '.', '_', '-')")
-    if schema_version == _LEGACY_SCHEMA_VERSION:
-        machine = _mapping(run_map.get("machine"), "run.machine")
-        _str(machine.get("id"), "run.machine.id")
-        _str(machine.get("hardware_id"), "run.machine.hardware_id")
-        software = _mapping(run_map.get("software"), "run.software")
-        _str(software.get("python"), "run.software.python")
-    else:
-        validate_hardware(run_map.get("hardware"), "run.hardware")
-        validate_libraries(run_map.get("libraries"), "run.libraries")
-    runner = _mapping(run_map.get("runner"), "run.runner")
-    _str(runner.get("user"), "run.runner.user")
-
-
-def _validate_dataset(dataset: Any) -> None:
-    dataset_map = _mapping(dataset, "dataset")
-    _str(dataset_map.get("name"), "dataset.name")
-    annotation = _mapping(dataset_map.get("annotation"), "dataset.annotation")
-    _str(annotation.get("path"), "dataset.annotation.path")
-    _hash(annotation.get("sha256"), "dataset.annotation.sha256", SHA256_PATTERN, "sha256")
-    _int(annotation.get("image_count"), "dataset.annotation.image_count", minimum=1)
-    if "images" in dataset_map:
-        _mapping(dataset_map["images"], "dataset.images")
-
-
-def _validate_benchmark_images(benchmark_images: Any) -> None:
-    images_map = _mapping(benchmark_images, "benchmark_images")
-    _str(images_map.get("dataset"), "benchmark_images.dataset")
-    _int(images_map.get("count"), "benchmark_images.count", minimum=1)
-    selection = _mapping(images_map.get("selection"), "benchmark_images.selection")
-    _str(selection.get("method"), "benchmark_images.selection.method")
-    _hash(selection.get("sha256"), "benchmark_images.selection.sha256", SHA256_PATTERN, "sha256")
-
-
-def validate_input_bundle(bundle: Any) -> None:
-    """Validate a complete skellybench input bundle."""
-    bundle_map = _mapping(bundle, "bundle")
-    version = _int(bundle_map.get("schema_version"), "schema_version", minimum=1)
-    if version not in {_LEGACY_SCHEMA_VERSION, SKELLYBENCH_SCHEMA_VERSION}:
-        raise _error("schema_version", f"must be {SKELLYBENCH_SCHEMA_VERSION}")
-    if bundle_map.get("kind") != INPUT_BUNDLE_KIND:
-        raise _error("kind", f"must be {INPUT_BUNDLE_KIND!r}")
-    _validate_run(bundle_map.get("run"), schema_version=version)
-    if "dataset" in bundle_map:
-        _validate_dataset(bundle_map["dataset"])
-    if "benchmark_images" in bundle_map:
-        _validate_benchmark_images(bundle_map["benchmark_images"])
-
-    models = _sequence(bundle_map.get("models"), "models")
-    if not models:
-        raise _error("models", "must contain at least one model")
-    identities: set[tuple[str, str]] = set()
-    any_measurement = False
-    for index, entry in enumerate(models):
-        path = f"models[{index}]"
-        entry_map = _mapping(entry, path)
-        _validate_model_metadata(entry_map.get("model"))
-        model = entry_map["model"]
-        identity = (str(model["id"]), str(model["artifact"]["sha256"]))
-        if identity in identities:
-            raise _error(path, "duplicate model.id/artifact.sha256 pair")
-        identities.add(identity)
-        has_accuracy = "accuracy" in entry_map
-        has_performance = "performance" in entry_map
-        if not has_accuracy and not has_performance:
-            raise _error(path, "must contain accuracy or performance")
-        any_measurement = True
-        if has_accuracy:
-            validate_accuracy(entry_map["accuracy"])
-        if has_performance:
-            validate_performance(entry_map["performance"])
-    if not any_measurement:
-        raise _error("models", "must contain at least one accuracy or performance section")
+def _validate_accuracy(accuracy: Any, path: str = "accuracy") -> None:
+    block = _mapping(accuracy, path)
+    _mapping(block.get("evaluation"), f"{path}.evaluation")
+    validate_metrics(block.get("metrics"), f"{path}.metrics")
+    validate_predictions_reference(block.get("predictions"), f"{path}.predictions")
+    pair = _optional_mapping(block.get("pair"), f"{path}.pair")
+    if pair is not None:
+        _str(pair.get("partner_report_id"), f"{path}.pair.partner_report_id")
 
 
 def validate_benchmark_report(payload: Any) -> None:
-    """Validate a throughput-only benchmark report."""
-    payload_map = _mapping(payload, "report")
-    version = _int(payload_map.get("schema_version"), "schema_version", minimum=1)
-    if version not in {_LEGACY_SCHEMA_VERSION, SKELLYBENCH_SCHEMA_VERSION}:
-        raise _error("schema_version", f"must be {SKELLYBENCH_SCHEMA_VERSION}")
-    if payload_map.get("kind") != BENCHMARK_REPORT_KIND:
-        raise _error("kind", f"must be {BENCHMARK_REPORT_KIND!r}")
-    report_id = _str(payload_map.get("report_id"), "report_id")
-    if not REPORT_ID_PATTERN.fullmatch(report_id):
-        raise _error("report_id", "must be Windows-safe")
-    _timestamp(payload_map.get("generated_at"), "generated_at")
-    _validate_run(payload_map.get("run"), schema_version=version)
-    _validate_model_metadata(payload_map.get("model"))
-    if "accuracy" in payload_map:
-        raise _error("accuracy", "benchmark reports are throughput-only")
-    validate_performance(payload_map.get("performance"))
-    if "model_report" in payload_map:
-        link = _mapping(payload_map["model_report"], "model_report")
-        _str(link.get("report_id"), "model_report.report_id")
-        if "filename" in link:
-            _filename(link["filename"], "model_report.filename")
-        if "sha256" in link:
-            _hash(link["sha256"], "model_report.sha256", SHA256_PATTERN, "sha256")
-    if "provenance" in payload_map:
-        _mapping(payload_map["provenance"], "provenance")
+    """Validate one benchmark report."""
+    document = _header(payload, BENCHMARK_REPORT_KIND)
+    benchmark_type = _one_of(document.get("benchmark_type"), "$.benchmark_type", BENCHMARK_TYPES)
+    status = _one_of(document.get("status"), "$.status", BENCHMARK_STATUSES)
+    _pattern(document.get("report_id"), "$.report_id", REPORT_ID_PATTERN, "a filename-safe report id")
+    _timestamp(document.get("generated_at"), "$.generated_at")
+    validate_run(document.get("run"), "$.run")
+    validate_host(document.get("host"), "$.host")
+    validate_environment(document.get("environment"), "$.environment")
+    validate_execution(document.get("execution"), "$.execution")
+    validate_subject(document.get("subject"), "$.subject")
+    if status == "measured":
+        validate_dataset(document.get("dataset"), "$.dataset")
+        validate_protocol(document.get("protocol"), "$.protocol")
+        if document["protocol"]["benchmark_type"] != benchmark_type:
+            raise _error("$.protocol.benchmark_type", "must equal $.benchmark_type")
+        _validate_performance(document.get("performance"), "$.performance")
+        if benchmark_type == ACCURACY:
+            _validate_accuracy(document.get("accuracy"), "$.accuracy")
+        elif document.get("accuracy") is not None:
+            raise _error("$.accuracy", "must be absent in a performance report")
+    else:
+        _str(document.get("reason"), "$.reason")
+        if document.get("accuracy") is not None:
+            raise _error("$.accuracy", "must be absent when status is not 'measured'")
+    reject_local_paths(document)
 
 
-def validate_benchmark_summary(payload: Any) -> None:
-    """Validate a run summary document."""
-    payload_map = _mapping(payload, "summary")
-    version = _int(payload_map.get("schema_version"), "schema_version", minimum=1)
-    if version not in {_LEGACY_SCHEMA_VERSION, SKELLYBENCH_SCHEMA_VERSION}:
-        raise _error("schema_version", f"must be {SKELLYBENCH_SCHEMA_VERSION}")
-    if payload_map.get("kind") != BENCHMARK_SUMMARY_KIND:
-        raise _error("kind", f"must be {BENCHMARK_SUMMARY_KIND!r}")
-    _str(payload_map.get("run_id"), "run_id")
-    _timestamp(payload_map.get("generated_at"), "generated_at")
-    _validate_run(payload_map.get("run"), schema_version=version)
-    models = _sequence(payload_map.get("models"), "models")
-    for index, entry in enumerate(models):
-        entry_map = _mapping(entry, f"models[{index}]")
-        _str(entry_map.get("model_id"), f"models[{index}].model_id")
-        _filename(entry_map.get("report"), f"models[{index}].report")
-        if "report_sha256" in entry_map:
-            _hash(entry_map["report_sha256"], f"models[{index}].report_sha256", SHA256_PATTERN, "sha256")
+# --- predictions file ------------------------------------------------------------------------------
 
 
-def validate_benchmark_overview(payload: Any) -> None:
-    """Validate a cross-machine index document."""
-    payload_map = _mapping(payload, "overview")
-    version = _int(payload_map.get("schema_version"), "schema_version", minimum=1)
-    if version not in {_LEGACY_SCHEMA_VERSION, SKELLYBENCH_SCHEMA_VERSION}:
-        raise _error("schema_version", f"must be {SKELLYBENCH_SCHEMA_VERSION}")
-    if payload_map.get("kind") != BENCHMARK_OVERVIEW_KIND:
-        raise _error("kind", f"must be {BENCHMARK_OVERVIEW_KIND!r}")
-    _timestamp(payload_map.get("generated_at"), "generated_at")
-    rows = _sequence(payload_map.get("rows"), "rows")
-    _int(payload_map.get("row_count"), "row_count")
-    if payload_map["row_count"] != len(rows):
-        raise _error("row_count", "must equal len(rows)")
-    for index, row in enumerate(rows):
-        row_map = _mapping(row, f"rows[{index}]")
-        _str(row_map.get("row_id"), f"rows[{index}].row_id")
-        _filename(row_map.get("report"), f"rows[{index}].report")
-        _str(row_map.get("provider"), f"rows[{index}].provider")
-        _str(row_map.get("mode"), f"rows[{index}].mode")
+def validate_predictions_header(payload: Any) -> None:
+    """Validate a predictions file, except the decoded content of ``data``."""
+    document = _header(payload, PREDICTIONS_KIND)
+    _pattern(document.get("report_id"), "$.report_id", REPORT_ID_PATTERN, "a filename-safe report id")
+    _one_of(document.get("format"), "$.format", (PREDICTIONS_FORMAT,))
+    image_ids = _sequence(document.get("image_ids"), "$.image_ids")
+    for index, image_id in enumerate(image_ids):
+        _int(image_id, f"$.image_ids[{index}]")
+    per_image = document.get("per_image")
+    counts = document.get("counts")
+    record_count = _int(document.get("record_count"), "$.record_count")
+    if (per_image is None) == (counts is None):
+        raise _error("$.per_image", "exactly one of per_image and counts must be set")
+    if per_image is not None:
+        _int(per_image, "$.per_image")
+        expected = per_image * len(image_ids)
+    else:
+        count_values = _sequence(counts, "$.counts")
+        if len(count_values) != len(image_ids):
+            raise _error("$.counts", "must have one entry per image id")
+        expected = sum(_int(value, f"$.counts[{index}]") for index, value in enumerate(count_values))
+    if expected != record_count:
+        raise _error("$.record_count", f"must equal {expected}")
+    _one_of(document.get("byte_order"), "$.byte_order", ("little",))
+    _one_of(document.get("layout"), "$.layout", ("column-major",))
+    _one_of(document.get("encoding"), "$.encoding", ("gzip+base64",))
+    _sha256(document.get("data_sha256"), "$.data_sha256")
+    if not isinstance(document.get("data"), str):
+        raise _error("$.data", "must be a string")
+
+
+# --- model report ----------------------------------------------------------------------------------
+
+
+def _physical_device(snapshot: Mapping[str, Any]) -> str | None:
+    execution = snapshot.get("execution") or {}
+    device = execution.get("device") or {}
+    if device.get("host_gpu_uuid"):
+        return f"gpu:{device['host_gpu_uuid']}"
+    host = snapshot.get("host") or {}
+    fingerprint = host.get("hardware_fingerprint")
+    cpu = (host.get("cpu") or {}).get("name")
+    if device.get("kind") in (None, "cpu", "soc"):
+        return f"cpu:{fingerprint}:{cpu}"
+    return None
+
+
+def validate_accuracy_pair(self_snapshot: Mapping[str, Any], parent_snapshot: Mapping[str, Any]) -> None:
+    """Raise when two accuracy benchmarks are not a valid self/parent pair.
+
+    They must share the run, dataset, batch size, evaluation settings, and physical device. The EP may
+    differ (for example ``torch-cuda`` for a checkpoint and ``cuda`` for its ONNX export).
+    """
+    checks = (
+        ("run.run_id", lambda snapshot: (snapshot.get("run") or {}).get("run_id")),
+        ("dataset.annotation_sha256", lambda snapshot: (snapshot.get("dataset") or {}).get("annotation_sha256")),
+        ("dataset.image_list_sha256", lambda snapshot: (snapshot.get("dataset") or {}).get("image_list_sha256")),
+        ("subject.batch_size", lambda snapshot: (snapshot.get("subject") or {}).get("batch_size")),
+        ("accuracy.evaluation", lambda snapshot: (snapshot.get("accuracy") or {}).get("evaluation")),
+        ("physical device", _physical_device),
+    )
+    for label, getter in checks:
+        left = getter(self_snapshot)
+        right = getter(parent_snapshot)
+        if left is None or left != right:
+            raise _error("$.accuracy", f"self and parent differ in {label} ({left!r} != {right!r})")
+
+
+def _validate_accuracy_entry(entry: Any, path: str) -> Mapping[str, Any]:
+    block = _mapping(entry, path)
+    link = _mapping(block.get("link"), f"{path}.link")
+    _str(link.get("path"), f"{path}.link.path")
+    _sha256(link.get("sha256"), f"{path}.link.sha256")
+    snapshot = _mapping(block.get("snapshot"), f"{path}.snapshot")
+    validate_benchmark_report(snapshot)
+    if snapshot.get("benchmark_type") != ACCURACY or snapshot.get("status") != "measured":
+        raise _error(f"{path}.snapshot", "must be a measured accuracy benchmark")
+    return snapshot
+
+
+def validate_model_report(payload: Any) -> None:
+    """Validate one model report, including the self/parent accuracy pair."""
+    document = _header(payload, MODEL_REPORT_KIND)
+    report_id = _pattern(document.get("report_id"), "$.report_id", SUBJECT_PATTERN, "a subject without '.'")
+    _pattern(document.get("created_run_id"), "$.created_run_id", RUN_ID_PATTERN, "a run id")
+    _timestamp(document.get("generated_at"), "$.generated_at")
+
+    model = _mapping(document.get("model"), "$.model")
+    _str(model.get("model_id"), "$.model.model_id")
+    _str(model.get("format"), "$.model.format")
+    _str(model.get("precision"), "$.model.precision")
+    _optional_int(model.get("batch_size"), "$.model.batch_size", minimum=1)
+    variant = _mapping(model.get("variant"), "$.model.variant")
+    _str(variant.get("family"), "$.model.variant.family")
+    _str(variant.get("size"), "$.model.variant.size")
+    _int(variant.get("size_rank"), "$.model.variant.size_rank")
+    validate_input(model.get("input"), "$.model.input")
+    artifact = _mapping(model.get("artifact"), "$.model.artifact")
+    _str(artifact.get("filename"), "$.model.artifact.filename")
+    _sha256(artifact.get("sha256"), "$.model.artifact.sha256")
+
+    creation = _mapping(document.get("creation"), "$.creation")
+    validate_run(creation.get("run"), "$.creation.run")
+    if creation["run"]["run_id"] != document["created_run_id"]:
+        raise _error("$.creation.run.run_id", "must equal $.created_run_id")
+    validate_host(creation.get("host"), "$.creation.host")
+    validate_environment(creation.get("environment"), "$.creation.environment")
+    source = _mapping(creation.get("source"), "$.creation.source")
+    _str(source.get("kind"), "$.creation.source.kind")
+    _str(source.get("url"), "$.creation.source.url")
+    if source.get("md5") is not None:
+        _pattern(source["md5"], "$.creation.source.md5", MD5_PATTERN, "a lowercase hex MD5")
+    _sha256(source.get("sha256"), "$.creation.source.sha256")
+    parent = _optional_mapping(creation.get("parent"), "$.creation.parent")
+    if parent is not None:
+        _str(parent.get("report_id"), "$.creation.parent.report_id")
+        _sha256(parent.get("sha256"), "$.creation.parent.sha256")
+    sidecar = _optional_mapping(creation.get("config_sidecar"), "$.creation.config_sidecar")
+    if sidecar is not None:
+        _str(sidecar.get("url"), "$.creation.config_sidecar.url")
+        _sha256(sidecar.get("sha256"), "$.creation.config_sidecar.sha256")
+    steps = _sequence(creation.get("steps"), "$.creation.steps")
+    if not steps:
+        raise _error("$.creation.steps", "must not be empty")
+    for index, step in enumerate(steps):
+        entry = _mapping(step, f"$.creation.steps[{index}]")
+        _str(entry.get("step"), f"$.creation.steps[{index}].step")
+        _str(entry.get("tool"), f"$.creation.steps[{index}].tool")
+        if parent is not None and entry.get("input_sha256") is not None:
+            if entry["input_sha256"] != parent["sha256"]:
+                raise _error(
+                    f"$.creation.steps[{index}].input_sha256",
+                    "must equal $.creation.parent.sha256",
+                )
+    last_output = steps[-1].get("output_sha256")
+    if last_output is not None and last_output != artifact["sha256"]:
+        raise _error("$.creation.steps", "the last step output_sha256 must equal $.model.artifact.sha256")
+
+    accuracy = _mapping(document.get("accuracy"), "$.accuracy")
+    self_snapshot = _validate_accuracy_entry(accuracy.get("self"), "$.accuracy.self")
+    if (self_snapshot.get("subject") or {}).get("artifact", {}).get("sha256") != artifact["sha256"]:
+        raise _error("$.accuracy.self.snapshot.subject.artifact.sha256", "must equal $.model.artifact.sha256")
+    if self_snapshot["subject"].get("model_report_id") != report_id:
+        raise _error("$.accuracy.self.snapshot.subject.model_report_id", "must equal $.report_id")
+    if parent is None:
+        if accuracy.get("parent") is not None or accuracy.get("comparison") is not None:
+            raise _error("$.accuracy", "parent and comparison must be null for a model without a parent")
+    else:
+        parent_snapshot = _validate_accuracy_entry(accuracy.get("parent"), "$.accuracy.parent")
+        if parent_snapshot["subject"]["artifact"]["sha256"] != parent["sha256"]:
+            raise _error("$.accuracy.parent.snapshot.subject.artifact.sha256", "must equal $.creation.parent.sha256")
+        validate_accuracy_pair(self_snapshot, parent_snapshot)
+        validate_comparison(accuracy.get("comparison"), "$.accuracy.comparison")
+    reject_local_paths(document)
+
+
+def payload_kind(payload: Any) -> str | None:
+    """Return the ``kind`` of a schema-3 payload, or ``None`` for any other JSON."""
+    if not isinstance(payload, Mapping) or payload.get("schema_version") != SCHEMA_VERSION:
+        return None
+    kind = payload.get("kind")
+    return kind if kind in REPORT_KINDS else None
 
 
 __all__ = [
-    "ACCURACY_SCENARIO",
-    "ACCURACY_STATUSES",
-    "BENCHMARK_OVERVIEW_KIND",
-    "BENCHMARK_PROTOCOL_VERSION",
+    "ACCURACY",
     "BENCHMARK_REPORT_KIND",
-    "BENCHMARK_SUMMARY_KIND",
+    "BENCHMARK_STATUSES",
+    "BENCHMARK_TYPES",
     "COCO_STAT_KEYS",
     "COMPARISON_STATUSES",
-    "INPUT_BUNDLE_KIND",
+    "EP_SLUG_PATTERN",
+    "FINGERPRINT_PATTERN",
+    "HOSTNAME_SLUG_PATTERN",
+    "MODEL_REPORT_KIND",
     "MODES",
-    "PASS_IDS",
-    "PASS_ORIGINS",
-    "PASS_STATUSES",
-    "PREDICTION_STORAGES",
-    "PROVIDER_KEYS",
+    "PERFORMANCE",
+    "PREDICTIONS_FORMAT",
+    "PREDICTIONS_KIND",
     "REPORT_ID_PATTERN",
+    "REPORT_KINDS",
     "RUN_ID_PATTERN",
-    "SCENARIOS",
-    "SCORING_MODES",
-    "SKELLYBENCH_SCHEMA_VERSION",
+    "SCHEMA_VERSION",
+    "SHA256_PATTERN",
+    "SUBJECT_PATTERN",
     "SkellybenchValidationError",
-    "THROUGHPUT_SCENARIO",
     "TIMING_SCOPES",
-    "validate_accuracy",
-    "validate_benchmark_overview",
+    "payload_kind",
+    "reject_local_paths",
+    "validate_accuracy_pair",
     "validate_benchmark_report",
-    "validate_benchmark_summary",
-    "validate_input_bundle",
-    "validate_hardware",
-    "validate_libraries",
+    "validate_comparison",
+    "validate_dataset",
+    "validate_environment",
+    "validate_execution",
+    "validate_host",
+    "validate_input",
     "validate_metrics",
-    "validate_performance",
-    "validate_prediction_record",
-    "validate_predictions_store",
+    "validate_model_report",
+    "validate_predictions_header",
+    "validate_predictions_reference",
     "validate_protocol",
+    "validate_run",
+    "validate_subject",
 ]

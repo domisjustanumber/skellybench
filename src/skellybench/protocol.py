@@ -1,36 +1,45 @@
-"""Canonical throughput protocol and derived identifiers."""
+"""Benchmark protocol blocks and their stable identifiers."""
 
 from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any, Mapping
+from typing import Any
 
-from .schema import (
-    BENCHMARK_PROTOCOL_VERSION,
-    THROUGHPUT_SCENARIO,
-    TIMING_SCOPES,
-    validate_protocol,
-)
+from .schema import ACCURACY, PERFORMANCE, TIMING_SCOPES
 
 
-def canonical_json(payload: Mapping[str, Any]) -> str:
-    """Serialize a mapping with stable key order and separators for hashing."""
+def canonical_json(payload: Any) -> str:
+    """Serialize a value with stable key order and separators for hashing."""
     return json.dumps(payload, sort_keys=True, separators=(",", ":"))
 
 
-def input_signature_id(signature: Mapping[str, Any]) -> str:
-    """Return the canonical hash of an input signature."""
-    return hashlib.sha256(canonical_json(signature).encode("utf-8")).hexdigest()
+def fingerprint(payload: Any) -> str:
+    """Return ``sha256:<hex>`` over the canonical JSON of *payload*."""
+    return "sha256:" + hashlib.sha256(canonical_json(payload).encode("utf-8")).hexdigest()
+
+
+def protocol_block(params: Mapping[str, Any]) -> dict[str, Any]:
+    """Return *params* plus a ``protocol_id``: the first 16 hex characters of their SHA-256.
+
+    *params* must hold ``benchmark_type`` and ``timing_scope``. Two benchmarks with the same
+    ``protocol_id`` used the same timing and evaluation settings.
+    """
+    block = {key: value for key, value in params.items() if key != "protocol_id"}
+    if block.get("benchmark_type") not in (ACCURACY, PERFORMANCE):
+        raise ValueError("protocol benchmark_type must be 'accuracy' or 'performance'")
+    if block.get("timing_scope") not in TIMING_SCOPES:
+        raise ValueError(f"protocol timing_scope must be one of {list(TIMING_SCOPES)}")
+    block["protocol_id"] = hashlib.sha256(canonical_json(block).encode("utf-8")).hexdigest()[:16]
+    return block
 
 
 @dataclass(frozen=True)
-class BenchmarkProtocol:
-    """Adaptive steady-state timing settings."""
+class PerformanceProtocol:
+    """Adaptive steady-state timing settings for a performance benchmark."""
 
-    scenario: str = THROUGHPUT_SCENARIO
-    version: int = BENCHMARK_PROTOCOL_VERSION
     images: int = 120
     warmup_passes: int = 1
     passes: int = 5
@@ -38,6 +47,17 @@ class BenchmarkProtocol:
     max_pass_seconds: float = 30.0
     cpu_threads: int = 0
     timing_scope: str = "session"
+    version: int = 1
+
+    def __post_init__(self) -> None:
+        if self.images < 1:
+            raise ValueError("images must be >= 1")
+        if self.warmup_passes < 0 or self.passes < 1:
+            raise ValueError("warmup_passes must be >= 0 and passes must be >= 1")
+        if self.min_pass_seconds < 0 or self.max_pass_seconds < self.min_pass_seconds:
+            raise ValueError("pass durations are invalid")
+        if self.timing_scope not in TIMING_SCOPES:
+            raise ValueError(f"timing_scope must be one of {list(TIMING_SCOPES)}")
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -51,70 +71,29 @@ class BenchmarkProtocol:
             "timing_scope": self.timing_scope,
         }
 
-    def payload(self, *, signature_id: str | None = None) -> dict[str, Any]:
-        """Return the protocol block stored in reports."""
-        protocol = self.as_dict()
-        if signature_id is not None:
-            protocol["input_signature_id"] = signature_id
-        protocol["protocol_id"] = self.protocol_id(signature_id=signature_id)
-        return protocol
-
-    def protocol_id(self, *, signature_id: str | None = None) -> str:
-        """Stable identifier over the protocol, scenario, and optional input signature."""
-        payload = {"scenario": self.scenario, **self.as_dict()}
-        if signature_id is not None:
-            payload["input_signature_id"] = signature_id
-        return hashlib.sha256(canonical_json(payload).encode("utf-8")).hexdigest()[:16]
-
-    def validate(self) -> None:
-        if self.scenario not in {"throughput_adaptive", "accuracy_full_dataset"}:
-            raise ValueError(f"unsupported scenario: {self.scenario!r}")
-        if self.timing_scope not in TIMING_SCOPES:
-            raise ValueError(f"unsupported timing scope: {self.timing_scope!r}")
-        validate_protocol(self.payload())
+    def block(self, *, batch_size: int) -> dict[str, Any]:
+        """Return the report ``protocol`` block for one batch size."""
+        return protocol_block({"benchmark_type": PERFORMANCE, "batch_size": batch_size, **self.as_dict()})
 
 
-def protocol_from_mapping(payload: Mapping[str, Any]) -> BenchmarkProtocol:
-    """Build and validate a protocol from an input/report mapping."""
-    validate_protocol(payload)
-    return BenchmarkProtocol(
-        scenario=payload.get("scenario", THROUGHPUT_SCENARIO),
-        version=int(payload["version"]),
-        images=int(payload["images"]),
-        warmup_passes=int(payload["warmup_passes"]),
-        passes=int(payload["passes"]),
-        min_pass_seconds=float(payload["min_pass_seconds"]),
-        max_pass_seconds=float(payload["max_pass_seconds"]),
-        cpu_threads=int(payload["cpu_threads"]),
-        timing_scope=str(payload["timing_scope"]),
+def accuracy_protocol(*, batch_size: int, images: int, evaluation: Mapping[str, Any]) -> dict[str, Any]:
+    """Return the report ``protocol`` block for an accuracy benchmark."""
+    return protocol_block(
+        {
+            "benchmark_type": ACCURACY,
+            "version": 1,
+            "batch_size": batch_size,
+            "images": images,
+            "timing_scope": "end_to_end",
+            "evaluation": dict(evaluation),
+        }
     )
 
 
-def comparison_key(
-    *,
-    artifact_sha256: str,
-    hardware_id: str,
-    environment_id: str,
-    protocol_id: str,
-    provider: str,
-    mode: str,
-) -> str:
-    """Stable key for one comparable performance row."""
-    payload = {
-        "artifact_sha256": artifact_sha256,
-        "hardware_id": hardware_id,
-        "environment_id": environment_id,
-        "protocol_id": protocol_id,
-        "provider": provider,
-        "mode": mode,
-    }
-    return "sha256:" + hashlib.sha256(canonical_json(payload).encode("utf-8")).hexdigest()
-
-
 __all__ = [
-    "BenchmarkProtocol",
+    "PerformanceProtocol",
+    "accuracy_protocol",
     "canonical_json",
-    "comparison_key",
-    "input_signature_id",
-    "protocol_from_mapping",
+    "fingerprint",
+    "protocol_block",
 ]
