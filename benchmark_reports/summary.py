@@ -7,7 +7,9 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from report_core import describe_file, read_json, utc_now
+from .._internal.hashing import describe_file
+from .._internal.io import read_json
+from .._internal.timestamps import utc_now
 
 from ..file_writer import write_html_file, write_json_file
 from ..html_reports.summary import render_run_summary_html

@@ -20,7 +20,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from report_core import iso_now
+from .._internal.timestamps import iso_now
 
 from ..hardware import DEFAULT_SOFTWARE_PACKAGES, detect_hardware, detect_libraries
 from ..schema import (

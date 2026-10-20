@@ -22,7 +22,7 @@ Keep HTML generation in `html_reports/`. Use `file_writer.py` for report file wr
 
 ## Design constraints
 
-- No imports of `rf_detr`, `onnx_runtime`, `torch`, or `onnxruntime`.
+- No imports of `report_core`, `rf_detr`, `onnx_runtime`, `torch`, or `onnxruntime`.
 - `faster-coco-eval` is optional and imported lazily, only when scoring is requested.
 - Reports never contain raw prediction records or local input paths.
 - Benchmark report artifacts are throughput-only. Accuracy metrics live in model reports.

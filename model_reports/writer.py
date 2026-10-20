@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from report_core import read_json
+from .._internal.io import read_json
 
 from ..file_writer import write_html_file, write_json_file
 from ..html_reports.model import render_model_report_html

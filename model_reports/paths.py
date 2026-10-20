@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
-from report_core import utc_stamp
+from .._internal.timestamps import utc_stamp
 
 MODEL_REPORT_JSON_SUFFIX = ".model.report.json"
 MODEL_REPORT_HTML_SUFFIX = ".model.report.html"

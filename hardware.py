@@ -15,7 +15,7 @@ from collections.abc import Iterable, Mapping, Sequence
 from importlib.metadata import PackageNotFoundError, version
 from typing import Any
 
-from report_core import sha256_text
+from ._internal.hashing import sha256_text
 
 DEFAULT_SOFTWARE_PACKAGES = (
     "onnx",

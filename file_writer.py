@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from report_core import atomic_write_json, atomic_write_text
+from ._internal.io import atomic_write_json, atomic_write_text
 
 
 def write_json_file(path: str | Path, payload: Any) -> Path:

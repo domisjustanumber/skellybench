@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from report_core import read_json
+from .._internal.io import read_json
 
 from .paths import ModelReportPaths
 from .schema import (

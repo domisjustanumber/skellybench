@@ -6,7 +6,7 @@ import json
 from collections.abc import Iterable, Mapping
 from typing import Any
 
-from report_core import format_filesize, format_number
+from .._internal.formatting import format_filesize, format_number
 
 from ..model_reports.schema import MODEL_OVERVIEW_KIND
 from .common import escape as _escape

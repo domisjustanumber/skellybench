@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from report_core import sha256_file
+from .._internal.hashing import sha256_file
 
 from ..schema import (
     COCO_STAT_KEYS,
