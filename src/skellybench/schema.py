@@ -452,6 +452,11 @@ def validate_libraries(libraries: Any, path: str = "libraries") -> None:
                 "must use a lowercase normalized distribution name",
             )
         _str(value, f"{path}.packages.{name}")
+    if "cuda" in libraries_map:
+        cuda = _mapping(libraries_map["cuda"], f"{path}.cuda")
+        for name in ("torch_cuda_build", "cudnn_runtime_version"):
+            if name in cuda:
+                _str(cuda[name], f"{path}.cuda.{name}")
 
 
 def _validate_run(run: Any, *, schema_version: int = SKELLYBENCH_SCHEMA_VERSION) -> None:

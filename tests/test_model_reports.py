@@ -251,6 +251,19 @@ def test_build_model_report_is_valid_and_contains_both_sections() -> None:
     assert payload["environment"]["libraries"]["python"]["version"] == "3.14.0"
 
 
+def test_model_report_validates_optional_cuda_versions() -> None:
+    payload = _payload()
+    payload["environment"]["libraries"]["cuda"] = {
+        "torch_cuda_build": "13.0",
+        "cudnn_runtime_version": "9.24.0",
+    }
+    validate_model_report(payload)
+
+    payload["environment"]["libraries"]["cuda"]["torch_cuda_build"] = 13.0
+    with pytest.raises(ModelReportValidationError, match="cuda.torch_cuda_build"):
+        validate_model_report(payload)
+
+
 def test_model_report_reads_legacy_environment() -> None:
     payload = _payload()
     payload["schema_version"] = 1
@@ -383,6 +396,22 @@ def test_render_report_html_escapes_values() -> None:
     rendered = render_model_report_html(payload)
     assert "<script>alert(1)</script>" not in rendered
     assert "&lt;script&gt;" in rendered
+
+
+def test_render_report_html_includes_cuda_versions() -> None:
+    payload = _payload()
+    payload["environment"]["libraries"]["cuda"] = {
+        "torch_cuda_build": "13.0",
+        "cudnn_runtime_version": "9.24.0",
+    }
+
+    rendered = render_model_report_html(payload)
+
+    assert "Test CPU" in rendered
+    assert "PyTorch CUDA build" in rendered
+    assert "13.0" in rendered
+    assert "cuDNN runtime" in rendered
+    assert "9.24.0" in rendered
 
 
 # --------------------------------------------------------------------------- writer and gate

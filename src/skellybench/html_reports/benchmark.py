@@ -63,6 +63,7 @@ def render_benchmark_report_html(payload: Mapping[str, Any]) -> str:
     legacy_software = run.get("software") or {}
     python = libraries.get("python") or {}
     package_versions = libraries.get("packages") or {}
+    cuda_versions = libraries.get("cuda") or {}
     performance = payload.get("performance") or {}
     protocol = performance.get("protocol") or {}
     title = (
@@ -85,8 +86,11 @@ def render_benchmark_report_html(payload: Mapping[str, Any]) -> str:
         ("Generated", payload.get("generated_at")),
         ("Scenario", performance.get("scenario")),
         ("Machine", hardware.get("label") or hardware.get("id")),
+        ("CPU", (hardware.get("cpu") or {}).get("model")),
         ("Runner", (run.get("runner") or {}).get("user")),
         ("Python", python.get("version") or legacy_software.get("python")),
+        ("PyTorch CUDA build", cuda_versions.get("torch_cuda_build")),
+        ("cuDNN runtime", cuda_versions.get("cudnn_runtime_version")),
         (
             "ONNX Runtime",
             package_versions.get("onnxruntime")

@@ -196,6 +196,9 @@ non-negative finite numbers. Throughput is images per second, never batches per 
 
 ## Report outputs
 
+For builder signatures and the input/output JSON structures for model reports, benchmark reports,
+and run summaries, see [the report API reference](docs/API_REPORTS.md).
+
 ### Benchmark report
 
 Report kind: `benchmark_report`

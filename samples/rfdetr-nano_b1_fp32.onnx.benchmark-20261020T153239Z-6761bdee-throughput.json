@@ -1,0 +1,688 @@
+{
+  "schema_version": 2,
+  "kind": "benchmark_report",
+  "report_id": "rfdetr-nano_b1_fp32.onnx.benchmark-20261020T153239Z-6761bdee-throughput",
+  "generated_at": "2026-10-20T15:32:41.041300+00:00",
+  "run": {
+    "run_id": "20261020T153239Z-6761bdee-throughput",
+    "started_at": "2026-10-20T15:32:41.041300+00:00",
+    "command": {
+      "argv": [
+        "--sizes",
+        "nano",
+        "--batch",
+        "1",
+        "--fp32",
+        "--force",
+        "--benchmark-providers",
+        "all",
+        "--benchmark-modes",
+        "both"
+      ],
+      "display": "--sizes nano --batch 1 --fp32 --force --benchmark-providers all --benchmark-modes both"
+    },
+    "runner": {
+      "user": "Dom",
+      "label": "Dom",
+      "hostname": "Gerald",
+      "hardware_id": "sha256:69048f338080e2fe79eb2d2643152da0102f0ef19da2c63b44e7b561e565a192"
+    },
+    "hardware": {
+      "id": "sha256:69048f338080e2fe79eb2d2643152da0102f0ef19da2c63b44e7b561e565a192",
+      "label": "Gerald",
+      "hardware_id": "sha256:39bc146fc78624d63a3833021f495b434939f600e20127d1d728c58945886fc9",
+      "os": {
+        "family": "windows",
+        "name": "Windows",
+        "version": "10.0.26300",
+        "arch": "AMD64",
+        "distribution": "Windows-11-10.0.26300-SP0",
+        "is_wsl": false
+      },
+      "cpu": {
+        "model": "Intel(R) Core(TM) i7-14700K",
+        "arch": "AMD64",
+        "logical_cores": 28
+      },
+      "gpus": [
+        {
+          "index": 0,
+          "id": "GPU-23465ec5-1fad-462f-0ca0-f27b67213a4b",
+          "name": "NVIDIA GeForce RTX 3070",
+          "driver": "610.88",
+          "vram_mb": 8192,
+          "vendor": "nvidia"
+        }
+      ],
+      "memory": {
+        "total_mb": 65244
+      }
+    },
+    "libraries": {
+      "python": {
+        "implementation": "CPython",
+        "version": "3.14.2"
+      },
+      "packages": {
+        "onnx": "1.23.2",
+        "onnxruntime": "not installed",
+        "onnxruntime-gpu": "1.31.0",
+        "numpy": "2.5.4",
+        "faster-coco-eval": "1.8.0",
+        "torch": "2.14.1+cu130",
+        "torchvision": "0.29.1+cu130"
+      },
+      "cuda": {
+        "torch_cuda_build": "13.0",
+        "cudnn_runtime_version": "9.24.0"
+      }
+    },
+    "labels": {
+      "location": "local",
+      "model_family": "rfdetr"
+    }
+  },
+  "model": {
+    "id": "rfdetr-nano",
+    "display_name": "RF-DETR Nano",
+    "task": "object-detection",
+    "format": "onnx",
+    "precision": "fp32",
+    "artifact": {
+      "filename": "rfdetr-nano_b1_fp32.onnx",
+      "sha256": "68d00b8d1583b02daa385dc91c681c9659760afab7c385a46381725ba6412c6a",
+      "bytes": 107824324
+    },
+    "input_signature": {
+      "batch_size": 1,
+      "shapes": [
+        [
+          1,
+          3,
+          384,
+          384
+        ]
+      ],
+      "dtype": "float32",
+      "layout": "NCHW",
+      "preprocessing_id": "imagenet_rgb_normalized"
+    },
+    "input_signature_id": "sha256:81772153f578ac742b505a09610aaffc81b43ae3717229ee3dc3d0f6a14dd972",
+    "metadata": {
+      "resolution": 384,
+      "num_queries": 300,
+      "num_select": 300,
+      "decode_background_id": null
+    }
+  },
+  "performance": {
+    "scenario": "throughput_adaptive",
+    "protocol": {
+      "version": 1,
+      "images": 120,
+      "warmup_passes": 1,
+      "passes": 5,
+      "min_pass_seconds": 1.0,
+      "max_pass_seconds": 30.0,
+      "cpu_threads": 0,
+      "timing_scope": "session",
+      "input_signature_id": "81772153f578ac742b505a09610aaffc81b43ae3717229ee3dc3d0f6a14dd972",
+      "protocol_id": "f09db357871f17c0"
+    },
+    "records": [
+      {
+        "record_id": "cpu/device/sha256:39bc146fc78624d63a3833021f495b434939f600e20127d1d728c58945886fc9",
+        "status": "measured",
+        "provider": "cpu",
+        "provider_label": "CPU",
+        "ep_name": "CPUExecutionProvider",
+        "mode": "device",
+        "scenario": "throughput_adaptive",
+        "timing_scope": "session",
+        "hardware_id": "sha256:39bc146fc78624d63a3833021f495b434939f600e20127d1d728c58945886fc9",
+        "environment_id": "sha256:c602272ce7baf36af711b1794b7f85461b403c12adc51074e16de07a79e16928",
+        "artifact_sha256": "68d00b8d1583b02daa385dc91c681c9659760afab7c385a46381725ba6412c6a",
+        "protocol_id": "f09db357871f17c0",
+        "timing": {
+          "images_per_second": 22.175,
+          "ms_per_image": 45.0966,
+          "batch_ms_p50": 44.8387,
+          "batch_ms_p95": 48.0345,
+          "batch_ms_min": 41.2211,
+          "batch_ms_max": 63.7865,
+          "iterations": 600,
+          "cv": 0.004346,
+          "pass_throughputs": [
+            22.012,
+            22.156,
+            22.248,
+            22.165,
+            22.294
+          ],
+          "pass_ms": [
+            5451.497,
+            5416.207,
+            5393.631,
+            5413.935,
+            5382.687
+          ],
+          "pass_images": [
+            120,
+            120,
+            120,
+            120,
+            120
+          ]
+        },
+        "stale": false,
+        "comparison_key": "sha256:f4fbbd8900a49c5b9ebc768f3f5b05e89b0dc2a67872cfc38dc80c9a97d014e4",
+        "device": {
+          "type": "cpu",
+          "index": null
+        },
+        "session": {
+          "create_ms": 291.195,
+          "first_inference_ms": 50.498,
+          "providers": [
+            "CPUExecutionProvider"
+          ]
+        },
+        "provider_options": {},
+        "input_signature_id": "sha256:81772153f578ac742b505a09610aaffc81b43ae3717229ee3dc3d0f6a14dd972"
+      },
+      {
+        "record_id": "cpu/host/sha256:39bc146fc78624d63a3833021f495b434939f600e20127d1d728c58945886fc9",
+        "status": "measured",
+        "provider": "cpu",
+        "provider_label": "CPU",
+        "ep_name": "CPUExecutionProvider",
+        "mode": "host",
+        "scenario": "throughput_adaptive",
+        "timing_scope": "session",
+        "hardware_id": "sha256:39bc146fc78624d63a3833021f495b434939f600e20127d1d728c58945886fc9",
+        "environment_id": "sha256:c602272ce7baf36af711b1794b7f85461b403c12adc51074e16de07a79e16928",
+        "artifact_sha256": "68d00b8d1583b02daa385dc91c681c9659760afab7c385a46381725ba6412c6a",
+        "protocol_id": "f09db357871f17c0",
+        "timing": {
+          "images_per_second": 22.101,
+          "ms_per_image": 45.2476,
+          "batch_ms_p50": 44.8916,
+          "batch_ms_p95": 48.2058,
+          "batch_ms_min": 41.447,
+          "batch_ms_max": 61.6968,
+          "iterations": 600,
+          "cv": 0.004778,
+          "pass_throughputs": [
+            22.205,
+            22.138,
+            21.898,
+            22.123,
+            22.141
+          ],
+          "pass_ms": [
+            5404.122,
+            5420.456,
+            5480.063,
+            5424.179,
+            5419.758
+          ],
+          "pass_images": [
+            120,
+            120,
+            120,
+            120,
+            120
+          ]
+        },
+        "stale": false,
+        "comparison_key": "sha256:38a044c7851e6990019837ce41dadd8ed121c095c792474a18a293b0027e5aae",
+        "device": {
+          "type": "cpu",
+          "index": null
+        },
+        "session": {
+          "create_ms": 264.969,
+          "first_inference_ms": 52.808,
+          "providers": [
+            "CPUExecutionProvider"
+          ]
+        },
+        "provider_options": {},
+        "input_signature_id": "sha256:81772153f578ac742b505a09610aaffc81b43ae3717229ee3dc3d0f6a14dd972"
+      },
+      {
+        "record_id": "openvino_gpu/device/sha256:39bc146fc78624d63a3833021f495b434939f600e20127d1d728c58945886fc9",
+        "status": "measured",
+        "provider": "openvino_gpu",
+        "provider_label": "OpenVINO iGPU",
+        "ep_name": "OpenVINOExecutionProvider",
+        "mode": "device",
+        "scenario": "throughput_adaptive",
+        "timing_scope": "session",
+        "hardware_id": "sha256:39bc146fc78624d63a3833021f495b434939f600e20127d1d728c58945886fc9",
+        "environment_id": "sha256:c602272ce7baf36af711b1794b7f85461b403c12adc51074e16de07a79e16928",
+        "artifact_sha256": "68d00b8d1583b02daa385dc91c681c9659760afab7c385a46381725ba6412c6a",
+        "protocol_id": "f09db357871f17c0",
+        "timing": {
+          "images_per_second": 15.889,
+          "ms_per_image": 62.9382,
+          "batch_ms_p50": 62.8842,
+          "batch_ms_p95": 63.3564,
+          "batch_ms_min": 62.4732,
+          "batch_ms_max": 67.6271,
+          "iterations": 600,
+          "cv": 0.000388,
+          "pass_throughputs": [
+            15.888,
+            15.877,
+            15.896,
+            15.892,
+            15.889
+          ],
+          "pass_ms": [
+            7552.635,
+            7557.887,
+            7549.047,
+            7551.127,
+            7552.246
+          ],
+          "pass_images": [
+            120,
+            120,
+            120,
+            120,
+            120
+          ]
+        },
+        "stale": false,
+        "comparison_key": "sha256:c7fe41ec8c9e5a9d8e305b2b37304cbc7c11b33cc00d4196c96fcbca007f4cc0",
+        "device": {
+          "type": "cpu",
+          "index": null
+        },
+        "session": {
+          "create_ms": 1113.305,
+          "first_inference_ms": 68.16,
+          "providers": [
+            "OpenVINOExecutionProvider",
+            "CPUExecutionProvider"
+          ]
+        },
+        "provider_options": {
+          "load_config": "{\"GPU\": {\"INFERENCE_PRECISION_HINT\": \"f32\", \"PERFORMANCE_HINT\": \"LATENCY\"}}"
+        },
+        "ep_package": {
+          "name": "onnxruntime-ep-openvino"
+        },
+        "ep_plugin": {
+          "registration_name": "OpenVINOExecutionProvider",
+          "library": "onnxruntime_providers_openvino_plugin.dll"
+        },
+        "input_signature_id": "sha256:81772153f578ac742b505a09610aaffc81b43ae3717229ee3dc3d0f6a14dd972"
+      },
+      {
+        "record_id": "openvino_gpu/host/sha256:39bc146fc78624d63a3833021f495b434939f600e20127d1d728c58945886fc9",
+        "status": "measured",
+        "provider": "openvino_gpu",
+        "provider_label": "OpenVINO iGPU",
+        "ep_name": "OpenVINOExecutionProvider",
+        "mode": "host",
+        "scenario": "throughput_adaptive",
+        "timing_scope": "session",
+        "hardware_id": "sha256:39bc146fc78624d63a3833021f495b434939f600e20127d1d728c58945886fc9",
+        "environment_id": "sha256:c602272ce7baf36af711b1794b7f85461b403c12adc51074e16de07a79e16928",
+        "artifact_sha256": "68d00b8d1583b02daa385dc91c681c9659760afab7c385a46381725ba6412c6a",
+        "protocol_id": "f09db357871f17c0",
+        "timing": {
+          "images_per_second": 15.789,
+          "ms_per_image": 63.334,
+          "batch_ms_p50": 63.2621,
+          "batch_ms_p95": 63.9092,
+          "batch_ms_min": 62.9273,
+          "batch_ms_max": 66.0512,
+          "iterations": 600,
+          "cv": 0.000473,
+          "pass_throughputs": [
+            15.803,
+            15.785,
+            15.782,
+            15.792,
+            15.785
+          ],
+          "pass_ms": [
+            7593.624,
+            7602.154,
+            7603.659,
+            7598.851,
+            7602.112
+          ],
+          "pass_images": [
+            120,
+            120,
+            120,
+            120,
+            120
+          ]
+        },
+        "stale": false,
+        "comparison_key": "sha256:47426724f2f4f56c8039e1a7aade401e6bf01ef43ae9aadf1fa5dd6c2505e2ef",
+        "device": {
+          "type": "cpu",
+          "index": null
+        },
+        "session": {
+          "create_ms": 935.131,
+          "first_inference_ms": 65.842,
+          "providers": [
+            "OpenVINOExecutionProvider",
+            "CPUExecutionProvider"
+          ]
+        },
+        "provider_options": {
+          "load_config": "{\"GPU\": {\"INFERENCE_PRECISION_HINT\": \"f32\", \"PERFORMANCE_HINT\": \"LATENCY\"}}"
+        },
+        "ep_package": {
+          "name": "onnxruntime-ep-openvino"
+        },
+        "ep_plugin": {
+          "registration_name": "OpenVINOExecutionProvider",
+          "library": "onnxruntime_providers_openvino_plugin.dll"
+        },
+        "input_signature_id": "sha256:81772153f578ac742b505a09610aaffc81b43ae3717229ee3dc3d0f6a14dd972"
+      },
+      {
+        "record_id": "cuda/device/sha256:39bc146fc78624d63a3833021f495b434939f600e20127d1d728c58945886fc9",
+        "status": "measured",
+        "provider": "cuda",
+        "provider_label": "CUDA",
+        "ep_name": "CUDAExecutionProvider",
+        "mode": "device",
+        "scenario": "throughput_adaptive",
+        "timing_scope": "session",
+        "hardware_id": "sha256:39bc146fc78624d63a3833021f495b434939f600e20127d1d728c58945886fc9",
+        "environment_id": "sha256:c602272ce7baf36af711b1794b7f85461b403c12adc51074e16de07a79e16928",
+        "artifact_sha256": "68d00b8d1583b02daa385dc91c681c9659760afab7c385a46381725ba6412c6a",
+        "protocol_id": "f09db357871f17c0",
+        "timing": {
+          "images_per_second": 139.6,
+          "ms_per_image": 7.1633,
+          "batch_ms_p50": 7.1311,
+          "batch_ms_p95": 7.3612,
+          "batch_ms_min": 6.9305,
+          "batch_ms_max": 8.225,
+          "iterations": 700,
+          "cv": 0.002255,
+          "pass_throughputs": [
+            139.887,
+            139.108,
+            139.357,
+            139.749,
+            139.9
+          ],
+          "pass_ms": [
+            1000.81,
+            1006.41,
+            1004.614,
+            1001.797,
+            1000.712
+          ],
+          "pass_images": [
+            140,
+            140,
+            140,
+            140,
+            140
+          ]
+        },
+        "stale": false,
+        "comparison_key": "sha256:848d26187c747ef83947827b30d94700472b4dd14642c0701f441d512c5cf972",
+        "device": {
+          "index": 0,
+          "id": "GPU-23465ec5-1fad-462f-0ca0-f27b67213a4b",
+          "name": "NVIDIA GeForce RTX 3070",
+          "driver": "610.88",
+          "vram_mb": 8192,
+          "vendor": "nvidia"
+        },
+        "session": {
+          "create_ms": 337.016,
+          "first_inference_ms": 88.922,
+          "providers": [
+            "CUDAExecutionProvider",
+            "CPUExecutionProvider"
+          ]
+        },
+        "provider_options": {
+          "cudnn_conv_algo_search": "HEURISTIC",
+          "arena_extend_strategy": "kSameAsRequested",
+          "do_copy_in_default_stream": "1",
+          "device_id": "0"
+        },
+        "input_signature_id": "sha256:81772153f578ac742b505a09610aaffc81b43ae3717229ee3dc3d0f6a14dd972"
+      },
+      {
+        "record_id": "cuda/host/sha256:39bc146fc78624d63a3833021f495b434939f600e20127d1d728c58945886fc9",
+        "status": "measured",
+        "provider": "cuda",
+        "provider_label": "CUDA",
+        "ep_name": "CUDAExecutionProvider",
+        "mode": "host",
+        "scenario": "throughput_adaptive",
+        "timing_scope": "session",
+        "hardware_id": "sha256:39bc146fc78624d63a3833021f495b434939f600e20127d1d728c58945886fc9",
+        "environment_id": "sha256:c602272ce7baf36af711b1794b7f85461b403c12adc51074e16de07a79e16928",
+        "artifact_sha256": "68d00b8d1583b02daa385dc91c681c9659760afab7c385a46381725ba6412c6a",
+        "protocol_id": "f09db357871f17c0",
+        "timing": {
+          "images_per_second": 128.486,
+          "ms_per_image": 7.7829,
+          "batch_ms_p50": 7.7387,
+          "batch_ms_p95": 8.0861,
+          "batch_ms_min": 7.5506,
+          "batch_ms_max": 8.6414,
+          "iterations": 645,
+          "cv": 0.001763,
+          "pass_throughputs": [
+            128.346,
+            128.468,
+            128.182,
+            128.853,
+            128.584
+          ],
+          "pass_ms": [
+            1005.098,
+            1004.141,
+            1006.382,
+            1001.143,
+            1003.237
+          ],
+          "pass_images": [
+            129,
+            129,
+            129,
+            129,
+            129
+          ]
+        },
+        "stale": false,
+        "comparison_key": "sha256:77a2b3e8874468676bf7d0f4e9b9d0e68604374840918272d8b2810401667c9a",
+        "device": {
+          "index": 0,
+          "id": "GPU-23465ec5-1fad-462f-0ca0-f27b67213a4b",
+          "name": "NVIDIA GeForce RTX 3070",
+          "driver": "610.88",
+          "vram_mb": 8192,
+          "vendor": "nvidia"
+        },
+        "session": {
+          "create_ms": 267.605,
+          "first_inference_ms": 14.721,
+          "providers": [
+            "CUDAExecutionProvider",
+            "CPUExecutionProvider"
+          ]
+        },
+        "provider_options": {
+          "cudnn_conv_algo_search": "HEURISTIC",
+          "arena_extend_strategy": "kSameAsRequested",
+          "do_copy_in_default_stream": "1",
+          "device_id": "0"
+        },
+        "input_signature_id": "sha256:81772153f578ac742b505a09610aaffc81b43ae3717229ee3dc3d0f6a14dd972"
+      },
+      {
+        "record_id": "tensorrt_rtx/device/sha256:39bc146fc78624d63a3833021f495b434939f600e20127d1d728c58945886fc9",
+        "status": "measured",
+        "provider": "tensorrt_rtx",
+        "provider_label": "TensorRT RTX",
+        "ep_name": "nv_tensorrt_rtx",
+        "mode": "device",
+        "scenario": "throughput_adaptive",
+        "timing_scope": "session",
+        "hardware_id": "sha256:39bc146fc78624d63a3833021f495b434939f600e20127d1d728c58945886fc9",
+        "environment_id": "sha256:c602272ce7baf36af711b1794b7f85461b403c12adc51074e16de07a79e16928",
+        "artifact_sha256": "68d00b8d1583b02daa385dc91c681c9659760afab7c385a46381725ba6412c6a",
+        "protocol_id": "f09db357871f17c0",
+        "timing": {
+          "images_per_second": 212.876,
+          "ms_per_image": 4.6976,
+          "batch_ms_p50": 4.671,
+          "batch_ms_p95": 4.8453,
+          "batch_ms_min": 4.598,
+          "batch_ms_max": 5.8994,
+          "iterations": 1065,
+          "cv": 0.00042,
+          "pass_throughputs": [
+            212.97,
+            212.845,
+            212.989,
+            212.823,
+            212.754
+          ],
+          "pass_ms": [
+            1000.142,
+            1000.727,
+            1000.054,
+            1000.831,
+            1001.155
+          ],
+          "pass_images": [
+            213,
+            213,
+            213,
+            213,
+            213
+          ]
+        },
+        "stale": false,
+        "comparison_key": "sha256:de8faeb9fc0767cbbbcb2ba07cab910168bf20c36b12efc302e6f963a2baf98b",
+        "device": {
+          "index": 0,
+          "id": "GPU-23465ec5-1fad-462f-0ca0-f27b67213a4b",
+          "name": "NVIDIA GeForce RTX 3070",
+          "driver": "610.88",
+          "vram_mb": 8192,
+          "vendor": "nvidia"
+        },
+        "session": {
+          "create_ms": 2804.731,
+          "first_inference_ms": 29.129,
+          "providers": [
+            "nv_tensorrt_rtx",
+            "CPUExecutionProvider"
+          ]
+        },
+        "provider_options": {
+          "enable_cuda_graph": "1"
+        },
+        "ep_package": {
+          "name": "onnxruntime-ep-nv-tensorrt-rtx"
+        },
+        "ep_plugin": {
+          "registration_name": "nv_tensorrt_rtx",
+          "library": "onnxruntime_providers_nv_tensorrt_rtx.dll"
+        },
+        "input_signature_id": "sha256:81772153f578ac742b505a09610aaffc81b43ae3717229ee3dc3d0f6a14dd972"
+      },
+      {
+        "record_id": "tensorrt_rtx/host/sha256:39bc146fc78624d63a3833021f495b434939f600e20127d1d728c58945886fc9",
+        "status": "measured",
+        "provider": "tensorrt_rtx",
+        "provider_label": "TensorRT RTX",
+        "ep_name": "nv_tensorrt_rtx",
+        "mode": "host",
+        "scenario": "throughput_adaptive",
+        "timing_scope": "session",
+        "hardware_id": "sha256:39bc146fc78624d63a3833021f495b434939f600e20127d1d728c58945886fc9",
+        "environment_id": "sha256:c602272ce7baf36af711b1794b7f85461b403c12adc51074e16de07a79e16928",
+        "artifact_sha256": "68d00b8d1583b02daa385dc91c681c9659760afab7c385a46381725ba6412c6a",
+        "protocol_id": "f09db357871f17c0",
+        "timing": {
+          "images_per_second": 212.246,
+          "ms_per_image": 4.7115,
+          "batch_ms_p50": 4.6898,
+          "batch_ms_p95": 4.8401,
+          "batch_ms_min": 4.577,
+          "batch_ms_max": 5.7014,
+          "iterations": 1064,
+          "cv": 0.003459,
+          "pass_throughputs": [
+            212.885,
+            212.235,
+            213.047,
+            212.082,
+            210.974
+          ],
+          "pass_ms": [
+            1000.538,
+            1003.604,
+            1004.472,
+            1004.327,
+            1000.121
+          ],
+          "pass_images": [
+            213,
+            213,
+            214,
+            213,
+            211
+          ]
+        },
+        "stale": false,
+        "comparison_key": "sha256:61cd452e61ad804979495721e623b354c007d0ae4e99eadcc0bef75af64b92c3",
+        "device": {
+          "index": 0,
+          "id": "GPU-23465ec5-1fad-462f-0ca0-f27b67213a4b",
+          "name": "NVIDIA GeForce RTX 3070",
+          "driver": "610.88",
+          "vram_mb": 8192,
+          "vendor": "nvidia"
+        },
+        "session": {
+          "create_ms": 2885.836,
+          "first_inference_ms": 31.143,
+          "providers": [
+            "nv_tensorrt_rtx",
+            "CPUExecutionProvider"
+          ]
+        },
+        "provider_options": {
+          "enable_cuda_graph": "1"
+        },
+        "ep_package": {
+          "name": "onnxruntime-ep-nv-tensorrt-rtx"
+        },
+        "ep_plugin": {
+          "registration_name": "nv_tensorrt_rtx",
+          "library": "onnxruntime_providers_nv_tensorrt_rtx.dll"
+        },
+        "input_signature_id": "sha256:81772153f578ac742b505a09610aaffc81b43ae3717229ee3dc3d0f6a14dd972"
+      }
+    ],
+    "unavailable": []
+  },
+  "model_report": {
+    "report_id": "rfdetr-nano_b1_fp32",
+    "filename": "rfdetr-nano_b1_fp32.onnx.model.report.json"
+  }
+}

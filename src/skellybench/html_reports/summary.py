@@ -41,6 +41,27 @@ def render_run_summary_html(payload: Mapping[str, Any]) -> str:
             + "</ul>"
         )
     hardware = run.get("hardware") or run.get("machine") or {}
+    cpu = hardware.get("cpu") or {}
+    libraries = run.get("libraries") or {}
+    cuda = libraries.get("cuda") or {}
+    environment_details = [
+        (label, value)
+        for label, value in (
+            ("CPU", cpu.get("model")),
+            ("PyTorch CUDA build", cuda.get("torch_cuda_build")),
+            ("cuDNN runtime", cuda.get("cudnn_runtime_version")),
+        )
+        if value is not None
+    ]
+    environment_html = (
+        "<p class=\"muted\">"
+        + " · ".join(
+            f"{escape(label)}: {escape(value)}" for label, value in environment_details
+        )
+        + "</p>"
+        if environment_details
+        else ""
+    )
     return f"""<!doctype html>
 <html lang="en">
 <head>
@@ -58,6 +79,7 @@ def render_run_summary_html(payload: Mapping[str, Any]) -> str:
 <body>
 <h1>Benchmark summary</h1>
 <p class="muted">Run {escape(payload.get('run_id', ''))} · {escape(hardware.get('label', ''))} · generated {escape(payload.get('generated_at', ''))}</p>
+{environment_html}
 <table><thead>{header}</thead><tbody>{''.join(rows)}</tbody></table>
 {unavailable_html}
 </body>

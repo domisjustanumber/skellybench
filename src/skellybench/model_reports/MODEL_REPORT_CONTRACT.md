@@ -45,6 +45,9 @@ A model report must contain:
 - Store hardware under `environment.hardware`.
 - Store Python and package versions under `environment.libraries`.
 - Use distribution names as package keys and version strings as values.
+- CUDA-enabled exporter reports can include `environment.libraries.cuda.torch_cuda_build` and
+  `environment.libraries.cuda.cudnn_runtime_version`.
+- Store both CUDA library versions as strings.
 - Use `"not installed"` when a tracked package is absent.
 - Use filenames, hashes, and record counts for prediction stores.
 - A benchmark snapshot must not contain an `accuracy` section.

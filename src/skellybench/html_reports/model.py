@@ -253,6 +253,11 @@ def render_model_report_html(payload: Mapping[str, Any]) -> str:
                 )
             )
         packages = libraries.get("packages") or {}
+        cuda = libraries.get("cuda") or {}
+        if cuda.get("torch_cuda_build") is not None:
+            environment_rows.append(("PyTorch CUDA build", cuda["torch_cuda_build"]))
+        if cuda.get("cudnn_runtime_version") is not None:
+            environment_rows.append(("cuDNN runtime", cuda["cudnn_runtime_version"]))
     else:
         packages = environment.get("packages") or {}
         environment_rows = [

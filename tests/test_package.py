@@ -639,13 +639,37 @@ def test_report_html_escapes_model_and_machine_values() -> None:
     assert "&lt;script&gt;" in rendered
 
 
+def test_benchmark_report_html_includes_cpu_and_cuda_versions() -> None:
+    report = _benchmark_report(Path("."))
+    report["run"]["libraries"]["cuda"] = {
+        "torch_cuda_build": "13.0",
+        "cudnn_runtime_version": "9.24.0",
+    }
+
+    rendered = render_benchmark_report_html(report)
+
+    assert "Test CPU" in rendered
+    assert "PyTorch CUDA build" in rendered
+    assert "13.0" in rendered
+    assert "cuDNN runtime" in rendered
+    assert "9.24.0" in rendered
+
+
 def test_run_summary_and_write(tmp_path: Path) -> None:
     report = _benchmark_report(tmp_path)
-    summary = build_run_summary(run=_run(), reports=[report], generated_at=STAMP)
+    run = _run()
+    run["libraries"]["cuda"] = {
+        "torch_cuda_build": "13.0",
+        "cudnn_runtime_version": "9.24.0",
+    }
+    summary = build_run_summary(run=run, reports=[report], generated_at=STAMP)
     assert summary["kind"] == BENCHMARK_SUMMARY_KIND
     assert summary["run_id"] == "run-1"
     assert summary["models"][0]["summary"]["images_per_second"] == 200.0
-    assert render_run_summary_html(summary)
+    rendered = render_run_summary_html(summary)
+    assert "Test CPU" in rendered
+    assert "PyTorch CUDA build: 13.0" in rendered
+    assert "cuDNN runtime: 9.24.0" in rendered
 
     json_path, html_path = benchmark_report_paths(tmp_path, "rfdetr-nano_b1_fp32.onnx", "run-1")
     write_benchmark_report((json_path, html_path), report)

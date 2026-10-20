@@ -1,0 +1,105 @@
+{
+  "schema_version": 2,
+  "kind": "benchmark_summary",
+  "run_id": "20261020T153239Z-6761bdee-throughput",
+  "generated_at": "2026-10-20T15:41:47.417802+00:00",
+  "run": {
+    "run_id": "20261020T153239Z-6761bdee-throughput",
+    "started_at": "2026-10-20T15:32:41.041300+00:00",
+    "command": {
+      "argv": [
+        "--sizes",
+        "nano",
+        "--batch",
+        "1",
+        "--fp32",
+        "--force",
+        "--benchmark-providers",
+        "all",
+        "--benchmark-modes",
+        "both"
+      ],
+      "display": "--sizes nano --batch 1 --fp32 --force --benchmark-providers all --benchmark-modes both"
+    },
+    "runner": {
+      "user": "Dom",
+      "label": "Dom",
+      "hostname": "Gerald",
+      "hardware_id": "sha256:69048f338080e2fe79eb2d2643152da0102f0ef19da2c63b44e7b561e565a192"
+    },
+    "hardware": {
+      "id": "sha256:69048f338080e2fe79eb2d2643152da0102f0ef19da2c63b44e7b561e565a192",
+      "label": "Gerald",
+      "hardware_id": "sha256:39bc146fc78624d63a3833021f495b434939f600e20127d1d728c58945886fc9",
+      "os": {
+        "family": "windows",
+        "name": "Windows",
+        "version": "10.0.26300",
+        "arch": "AMD64",
+        "distribution": "Windows-11-10.0.26300-SP0",
+        "is_wsl": false
+      },
+      "cpu": {
+        "model": "Intel(R) Core(TM) i7-14700K",
+        "arch": "AMD64",
+        "logical_cores": 28
+      },
+      "gpus": [
+        {
+          "index": 0,
+          "id": "GPU-23465ec5-1fad-462f-0ca0-f27b67213a4b",
+          "name": "NVIDIA GeForce RTX 3070",
+          "driver": "610.88",
+          "vram_mb": 8192,
+          "vendor": "nvidia"
+        }
+      ],
+      "memory": {
+        "total_mb": 65244
+      }
+    },
+    "libraries": {
+      "python": {
+        "implementation": "CPython",
+        "version": "3.14.2"
+      },
+      "packages": {
+        "onnx": "1.23.2",
+        "onnxruntime": "not installed",
+        "onnxruntime-gpu": "1.31.0",
+        "numpy": "2.5.4",
+        "faster-coco-eval": "1.8.0",
+        "torch": "2.14.1+cu130",
+        "torchvision": "0.29.1+cu130"
+      },
+      "cuda": {
+        "torch_cuda_build": "13.0",
+        "cudnn_runtime_version": "9.24.0"
+      }
+    },
+    "labels": {
+      "location": "local",
+      "model_family": "rfdetr"
+    },
+    "finished_at": "2026-10-20T15:41:47.127040+00:00"
+  },
+  "models": [
+    {
+      "model_id": "rfdetr-nano",
+      "artifact": {
+        "filename": "rfdetr-nano_b1_fp32.onnx",
+        "sha256": "68d00b8d1583b02daa385dc91c681c9659760afab7c385a46381725ba6412c6a"
+      },
+      "report": "rfdetr-nano_b1_fp32.onnx.benchmark-20261020T153239Z-6761bdee-throughput.json",
+      "model_report": "rfdetr-nano_b1_fp32.onnx.model.report.json",
+      "performance_status": "measured",
+      "summary": {
+        "images_per_second": 212.876,
+        "record_count": 8,
+        "unavailable_count": 0
+      },
+      "report_sha256": "381394bc470a33b208809209d19c92c2ef719a6577525de3b9d6d851d462347c"
+    }
+  ],
+  "unavailable": []
+}
