@@ -1,0 +1,29 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "skellybench"
+version = "0.1.0"
+description = "Library-agnostic COCO scoring and report writing for model benchmarks"
+readme = "README.md"
+license = "AGPL-3.0-or-later"
+license-files = ["LICENSE"]
+requires-python = ">=3.13"
+dependencies = []
+
+[project.optional-dependencies]
+scoring = ["faster-coco-eval==1.8.0"]
+
+[project.scripts]
+skellybench = "skellybench.__main__:main"
+
+[dependency-groups]
+dev = ["pytest==9.1.1", "faster-coco-eval==1.8.0"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/skellybench"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"

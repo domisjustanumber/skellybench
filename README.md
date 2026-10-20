@@ -1,11 +1,27 @@
 # skellybench
 
-`skellybench` is the library-agnostic scoring and reporting layer for the Roboflow Exporter.
-Producers (`onnx_runtime`, `rf_detr`, and future exporters) hand it plain dictionaries. It validates
-the bundle, optionally recomputes COCO metrics, and writes model reports, benchmark reports, run
-summaries, and cross-machine overviews.
+`skellybench` is a library-agnostic scoring and reporting layer for model benchmarks.
+Producers hand it plain dictionaries. It validates the bundle, optionally recomputes COCO metrics,
+and writes model reports, benchmark reports, run summaries, and cross-machine overviews.
+
+## Install
+
+```powershell
+uv add skellybench
+```
+
+Scoring uses `faster-coco-eval`. Install the optional extra to enable it:
+
+```powershell
+uv add "skellybench[scoring]"
+```
+
+The extra is optional. Importing the package and running the capability probe need only the
+standard library.
 
 ## Package layout
+
+Paths are relative to `src/skellybench/`.
 
 | Path | Responsibility |
 |---|---|
@@ -32,8 +48,9 @@ Keep HTML generation in `html_reports/`. Use `file_writer.py` for report file wr
 ## Capability probe
 
 ```powershell
-uv run python -m skellybench capabilities
-uv run python -m skellybench capabilities --format text
+python -m skellybench capabilities
+python -m skellybench capabilities --format text
+skellybench capabilities --format text
 ```
 
 The capability contract is the single source used by the README and schema tests.
@@ -259,3 +276,17 @@ A model report references each benchmark report by `report_id`, filename, `sha25
 `comparison_key`. It embeds the complete benchmark report payload, including run metadata, protocol,
 hardware and library versions, provider details, and timing records. It never embeds raw prediction
 records or local paths.
+
+## Development
+
+```powershell
+uv sync
+uv run pytest
+uv run --python 3.14 pytest
+uv build
+```
+
+## License
+
+This project is licensed under the GNU Affero General Public License v3.0 or later.
+See [LICENSE](LICENSE) for the full text.
