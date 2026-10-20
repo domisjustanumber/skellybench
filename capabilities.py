@@ -11,6 +11,7 @@ from .schema import (
     BENCHMARK_REPORT_KIND,
     BENCHMARK_SUMMARY_KIND,
     COCO_STAT_KEYS,
+    INPUT_BUNDLE_KIND,
     MODES,
     PASS_IDS,
     PASS_ORIGINS,
@@ -23,6 +24,7 @@ from .schema import (
     THROUGHPUT_SCENARIO,
     TIMING_SCOPES,
 )
+from .model_reports.schema import MODEL_OVERVIEW_KIND, MODEL_REPORT_KIND
 
 
 def capabilities() -> dict[str, Any]:
@@ -38,6 +40,8 @@ def capabilities() -> dict[str, Any]:
             BENCHMARK_REPORT_KIND,
             BENCHMARK_SUMMARY_KIND,
             BENCHMARK_OVERVIEW_KIND,
+            MODEL_REPORT_KIND,
+            MODEL_OVERVIEW_KIND,
         ],
         "accuracy": {
             "passes": list(PASS_IDS),
@@ -63,13 +67,19 @@ def capabilities() -> dict[str, Any]:
             "storages": list(PREDICTION_STORAGES),
             "format": "coco_detection_results",
         },
+        "environment": {
+            "hardware_fields": ["id", "hardware_id", "os", "cpu", "gpus"],
+            "library_fields": ["python.implementation", "python.version", "packages"],
+            "package_key_format": "PEP 503 normalized distribution name",
+        },
         "metrics": {
             "metric_keys": list(COCO_STAT_KEYS),
             "tool": "faster_coco_eval",
         },
         "reports": {
             "writes_benchmark_reports": True,
-            "writes_model_reports": False,
+            "writes_model_reports": True,
+            "input_kind": INPUT_BUNDLE_KIND,
             "embeds_raw_predictions": False,
             "throughput_only_benchmark_reports": True,
         },
@@ -85,7 +95,7 @@ def describe() -> str:
     """Return a short human-readable capability summary."""
     caps = capabilities()
     return (
-        "skellybench: throughput-only benchmark reports; "
+        "skellybench: model and benchmark reports; "
         f"accuracy passes={caps['accuracy']['passes']}; "
         f"providers={caps['performance']['providers']}; "
         f"modes={caps['performance']['modes']}; "

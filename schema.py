@@ -12,7 +12,8 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
-SKELLYBENCH_SCHEMA_VERSION = 1
+SKELLYBENCH_SCHEMA_VERSION = 2
+_LEGACY_SCHEMA_VERSION = 1
 BENCHMARK_PROTOCOL_VERSION = 1
 
 INPUT_BUNDLE_KIND = "skellybench_run"
@@ -406,16 +407,67 @@ def _validate_model_metadata(model: Any) -> None:
         _mapping(model_map["metadata"], "model.metadata")
 
 
-def _validate_run(run: Any) -> None:
+def validate_hardware(hardware: Any, path: str = "hardware") -> None:
+    """Validate the standard hardware identity shared by all skellybench reports."""
+    hardware_map = _mapping(hardware, path)
+    _str(hardware_map.get("id"), f"{path}.id")
+    _str(hardware_map.get("hardware_id"), f"{path}.hardware_id")
+    os_info = _mapping(hardware_map.get("os"), f"{path}.os")
+    for key in ("family", "name", "version", "arch"):
+        _str(os_info.get(key), f"{path}.os.{key}")
+    cpu = _mapping(hardware_map.get("cpu"), f"{path}.cpu")
+    _str(cpu.get("model"), f"{path}.cpu.model")
+    _str(cpu.get("arch"), f"{path}.cpu.arch")
+    for key in ("physical_cores", "logical_cores"):
+        if key in cpu and cpu[key] is not None:
+            _int(cpu[key], f"{path}.cpu.{key}", minimum=1)
+    if "memory" in hardware_map:
+        memory = _mapping(hardware_map["memory"], f"{path}.memory")
+        _int(memory.get("total_mb"), f"{path}.memory.total_mb", minimum=1)
+    gpus = _sequence(hardware_map.get("gpus"), f"{path}.gpus")
+    for index, gpu in enumerate(gpus):
+        gpu_path = f"{path}.gpus[{index}]"
+        gpu_map = _mapping(gpu, gpu_path)
+        _int(gpu_map.get("index"), f"{gpu_path}.index")
+        _str(gpu_map.get("id"), f"{gpu_path}.id")
+        _str(gpu_map.get("name"), f"{gpu_path}.name")
+        _str(gpu_map.get("vendor"), f"{gpu_path}.vendor")
+        _str(gpu_map.get("driver"), f"{gpu_path}.driver")
+        if gpu_map.get("vram_mb") is not None:
+            _int(gpu_map["vram_mb"], f"{gpu_path}.vram_mb", minimum=1)
+
+
+def validate_libraries(libraries: Any, path: str = "libraries") -> None:
+    """Validate Python and distribution versions in the standard format."""
+    libraries_map = _mapping(libraries, path)
+    python = _mapping(libraries_map.get("python"), f"{path}.python")
+    _str(python.get("implementation"), f"{path}.python.implementation")
+    _str(python.get("version"), f"{path}.python.version")
+    packages = _mapping(libraries_map.get("packages"), f"{path}.packages")
+    for name, value in packages.items():
+        package_name = _str(name, f"{path}.packages key")
+        if not re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", package_name):
+            raise _error(
+                f"{path}.packages key",
+                "must use a lowercase normalized distribution name",
+            )
+        _str(value, f"{path}.packages.{name}")
+
+
+def _validate_run(run: Any, *, schema_version: int = SKELLYBENCH_SCHEMA_VERSION) -> None:
     run_map = _mapping(run, "run")
     run_id = _str(run_map.get("run_id"), "run.run_id")
     if not RUN_ID_PATTERN.fullmatch(run_id):
         raise _error("run.run_id", "must be Windows-safe (letters, digits, '.', '_', '-')")
-    machine = _mapping(run_map.get("machine"), "run.machine")
-    _str(machine.get("id"), "run.machine.id")
-    _str(machine.get("hardware_id"), "run.machine.hardware_id")
-    software = _mapping(run_map.get("software"), "run.software")
-    _str(software.get("python"), "run.software.python")
+    if schema_version == _LEGACY_SCHEMA_VERSION:
+        machine = _mapping(run_map.get("machine"), "run.machine")
+        _str(machine.get("id"), "run.machine.id")
+        _str(machine.get("hardware_id"), "run.machine.hardware_id")
+        software = _mapping(run_map.get("software"), "run.software")
+        _str(software.get("python"), "run.software.python")
+    else:
+        validate_hardware(run_map.get("hardware"), "run.hardware")
+        validate_libraries(run_map.get("libraries"), "run.libraries")
     runner = _mapping(run_map.get("runner"), "run.runner")
     _str(runner.get("user"), "run.runner.user")
 
@@ -444,11 +496,11 @@ def validate_input_bundle(bundle: Any) -> None:
     """Validate a complete skellybench input bundle."""
     bundle_map = _mapping(bundle, "bundle")
     version = _int(bundle_map.get("schema_version"), "schema_version", minimum=1)
-    if version != SKELLYBENCH_SCHEMA_VERSION:
+    if version not in {_LEGACY_SCHEMA_VERSION, SKELLYBENCH_SCHEMA_VERSION}:
         raise _error("schema_version", f"must be {SKELLYBENCH_SCHEMA_VERSION}")
     if bundle_map.get("kind") != INPUT_BUNDLE_KIND:
         raise _error("kind", f"must be {INPUT_BUNDLE_KIND!r}")
-    _validate_run(bundle_map.get("run"))
+    _validate_run(bundle_map.get("run"), schema_version=version)
     if "dataset" in bundle_map:
         _validate_dataset(bundle_map["dataset"])
     if "benchmark_images" in bundle_map:
@@ -485,7 +537,7 @@ def validate_benchmark_report(payload: Any) -> None:
     """Validate a throughput-only benchmark report."""
     payload_map = _mapping(payload, "report")
     version = _int(payload_map.get("schema_version"), "schema_version", minimum=1)
-    if version != SKELLYBENCH_SCHEMA_VERSION:
+    if version not in {_LEGACY_SCHEMA_VERSION, SKELLYBENCH_SCHEMA_VERSION}:
         raise _error("schema_version", f"must be {SKELLYBENCH_SCHEMA_VERSION}")
     if payload_map.get("kind") != BENCHMARK_REPORT_KIND:
         raise _error("kind", f"must be {BENCHMARK_REPORT_KIND!r}")
@@ -493,7 +545,7 @@ def validate_benchmark_report(payload: Any) -> None:
     if not REPORT_ID_PATTERN.fullmatch(report_id):
         raise _error("report_id", "must be Windows-safe")
     _timestamp(payload_map.get("generated_at"), "generated_at")
-    _validate_run(payload_map.get("run"))
+    _validate_run(payload_map.get("run"), schema_version=version)
     _validate_model_metadata(payload_map.get("model"))
     if "accuracy" in payload_map:
         raise _error("accuracy", "benchmark reports are throughput-only")
@@ -512,13 +564,14 @@ def validate_benchmark_report(payload: Any) -> None:
 def validate_benchmark_summary(payload: Any) -> None:
     """Validate a run summary document."""
     payload_map = _mapping(payload, "summary")
-    if payload_map.get("schema_version") != SKELLYBENCH_SCHEMA_VERSION:
+    version = _int(payload_map.get("schema_version"), "schema_version", minimum=1)
+    if version not in {_LEGACY_SCHEMA_VERSION, SKELLYBENCH_SCHEMA_VERSION}:
         raise _error("schema_version", f"must be {SKELLYBENCH_SCHEMA_VERSION}")
     if payload_map.get("kind") != BENCHMARK_SUMMARY_KIND:
         raise _error("kind", f"must be {BENCHMARK_SUMMARY_KIND!r}")
     _str(payload_map.get("run_id"), "run_id")
     _timestamp(payload_map.get("generated_at"), "generated_at")
-    _validate_run(payload_map.get("run"))
+    _validate_run(payload_map.get("run"), schema_version=version)
     models = _sequence(payload_map.get("models"), "models")
     for index, entry in enumerate(models):
         entry_map = _mapping(entry, f"models[{index}]")
@@ -531,7 +584,8 @@ def validate_benchmark_summary(payload: Any) -> None:
 def validate_benchmark_overview(payload: Any) -> None:
     """Validate a cross-machine index document."""
     payload_map = _mapping(payload, "overview")
-    if payload_map.get("schema_version") != SKELLYBENCH_SCHEMA_VERSION:
+    version = _int(payload_map.get("schema_version"), "schema_version", minimum=1)
+    if version not in {_LEGACY_SCHEMA_VERSION, SKELLYBENCH_SCHEMA_VERSION}:
         raise _error("schema_version", f"must be {SKELLYBENCH_SCHEMA_VERSION}")
     if payload_map.get("kind") != BENCHMARK_OVERVIEW_KIND:
         raise _error("kind", f"must be {BENCHMARK_OVERVIEW_KIND!r}")
@@ -577,6 +631,8 @@ __all__ = [
     "validate_benchmark_report",
     "validate_benchmark_summary",
     "validate_input_bundle",
+    "validate_hardware",
+    "validate_libraries",
     "validate_metrics",
     "validate_performance",
     "validate_prediction_record",

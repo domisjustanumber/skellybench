@@ -2,15 +2,16 @@
 
 from __future__ import annotations
 
-import html
 from collections.abc import Mapping, Sequence
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from report_core import atomic_write_json, atomic_write_text, describe_file, read_json, utc_now
+from report_core import describe_file, read_json, utc_now
 
-from .schema import (
+from ..file_writer import write_html_file, write_json_file
+from ..html_reports.summary import render_run_summary_html
+from ..schema import (
     BENCHMARK_SUMMARY_KIND,
     SKELLYBENCH_SCHEMA_VERSION,
     validate_benchmark_report,
@@ -87,66 +88,6 @@ def build_run_summary(
     return payload
 
 
-def _escape(value: Any) -> str:
-    return html.escape("" if value is None else str(value))
-
-
-def render_run_summary_html(payload: Mapping[str, Any]) -> str:
-    """Render a self-contained run summary."""
-    run = payload.get("run") or {}
-    models = payload.get("models") or []
-    header = (
-        "<tr><th scope=\"col\">Model</th><th scope=\"col\">Artifact</th>"
-        "<th scope=\"col\">Report</th><th scope=\"col\">Status</th>"
-        "<th scope=\"col\">Best images/s</th><th scope=\"col\">Records</th></tr>"
-    )
-    rows = []
-    for entry in models:
-        summary = entry.get("summary") or {}
-        cells = (
-            entry.get("model_id"),
-            (entry.get("artifact") or {}).get("filename"),
-            entry.get("report"),
-            entry.get("performance_status"),
-            summary.get("images_per_second"),
-            summary.get("record_count"),
-        )
-        rows.append("<tr>" + "".join(f"<td>{_escape(cell)}</td>" for cell in cells) + "</tr>")
-    unavailable = payload.get("unavailable") or []
-    unavailable_html = ""
-    if unavailable:
-        unavailable_html = (
-            "<h2>Unavailable providers</h2><ul>"
-            + "".join(
-                f"<li>{_escape(item.get('provider'))}: {_escape(item.get('reason'))}</li>"
-                for item in unavailable
-            )
-            + "</ul>"
-        )
-    return f"""<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<title>Benchmark summary {_escape(payload.get("run_id", ""))}</title>
-<style>
-  :root {{ color-scheme: light dark; }}
-  body {{ font: 14px/1.5 ui-sans-serif, system-ui, sans-serif; margin: 2rem auto; max-width: 78rem; padding: 0 1rem; }}
-  table {{ border-collapse: collapse; width: 100%; margin-top: 1rem; }}
-  th, td {{ border-bottom: 1px solid rgba(128,128,128,.35); padding: .35rem .55rem; text-align: left; }}
-  th {{ background: Canvas; }}
-  .muted {{ opacity: .7; }}
-</style>
-</head>
-<body>
-<h1>Benchmark summary</h1>
-<p class="muted">Run {_escape(payload.get('run_id', ''))} · {_escape(run.get('machine', {}).get('label', ''))} · generated {_escape(payload.get('generated_at', ''))}</p>
-<table><thead>{header}</thead><tbody>{''.join(rows)}</tbody></table>
-{unavailable_html}
-</body>
-</html>
-"""
-
-
 def write_run_summary(
     output_dir: str | Path,
     *,
@@ -172,8 +113,8 @@ def write_run_summary(
         generated_at=generated_at,
     )
     json_path, html_path = summary_paths(output_dir, str(run["run_id"]))
-    atomic_write_json(json_path, summary)
-    atomic_write_text(html_path, render_run_summary_html(summary))
+    write_json_file(json_path, summary)
+    write_html_file(html_path, render_run_summary_html(summary))
     return json_path, html_path
 
 
@@ -189,14 +130,13 @@ def rewrite_summary_html(output_root: str | Path) -> int:
             validate_benchmark_summary(payload)
         except Exception:
             continue
-        atomic_write_text(summary_file.with_suffix(".html"), render_run_summary_html(payload))
+        write_html_file(summary_file.with_suffix(".html"), render_run_summary_html(payload))
         written += 1
     return written
 
 
 __all__ = [
     "build_run_summary",
-    "render_run_summary_html",
     "rewrite_summary_html",
     "summary_paths",
     "write_run_summary",

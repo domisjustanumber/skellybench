@@ -1,29 +1,42 @@
-"""skellybench: library-agnostic benchmark scoring and reporting.
+"""skellybench: library-agnostic model and benchmark scoring and reporting.
 
 Producers hand skellybench plain dictionaries. It can recompute COCO metrics when predictions and
-annotations are available, accepts precomputed metrics otherwise, and writes throughput-only
-benchmark reports, run summaries, and a cross-machine index.
+annotations are available, accepts precomputed metrics otherwise, and writes model reports,
+benchmark reports, run summaries, and cross-machine overviews.
 """
 
 from __future__ import annotations
 
 from .capabilities import capabilities, describe, supports
-from .hardware import detect_machine, detect_software, environment_id, runner_identity
-from .index import build_index, index_paths, render_index_html, write_index
+from .hardware import detect_hardware, detect_libraries, environment_id, runner_identity
+from .benchmark_reports import (
+    benchmark_report_id,
+    benchmark_report_paths,
+    build_benchmark_report,
+    build_index,
+    build_run_summary,
+    index_paths,
+    rewrite_benchmark_report_html,
+    rewrite_summary_html,
+    summary_paths,
+    write_benchmark_report,
+    write_index,
+    write_run_summary,
+)
+from .file_writer import write_html_file, write_json_file
+from .html_reports import (
+    render_benchmark_report_html,
+    render_index_html,
+    render_model_overview_html,
+    render_model_report_html,
+    render_run_summary_html,
+)
 from .protocol import (
     BenchmarkProtocol,
     canonical_json,
     comparison_key,
     input_signature_id,
     protocol_from_mapping,
-)
-from .reports import (
-    benchmark_report_id,
-    benchmark_report_paths,
-    build_benchmark_report,
-    render_benchmark_report_html,
-    rewrite_benchmark_report_html,
-    write_benchmark_report,
 )
 from .schema import (
     ACCURACY_SCENARIO,
@@ -51,7 +64,9 @@ from .schema import (
     validate_benchmark_overview,
     validate_benchmark_report,
     validate_benchmark_summary,
+    validate_hardware,
     validate_input_bundle,
+    validate_libraries,
     validate_metrics,
     validate_performance,
     validate_prediction_record,
@@ -70,14 +85,33 @@ from .scoring import (
     score_accuracy,
     score_predictions,
 )
-from .summary import (
-    build_run_summary,
-    render_run_summary_html,
-    rewrite_summary_html,
-    summary_paths,
-    write_run_summary,
+from .model_reports import (
+    MODEL_OVERVIEW_KIND,
+    MODEL_OVERVIEW_STEM,
+    MODEL_REPORT_HTML_SUFFIX,
+    MODEL_REPORT_JSON_SUFFIX,
+    MODEL_REPORT_KIND,
+    MODEL_REPORT_SCHEMA_VERSION,
+    ModelReportCheck,
+    ModelReportIdentity,
+    ModelReportPaths,
+    ModelReportValidationError,
+    ModelReportWriteResult,
+    build_model_overview,
+    build_model_report,
+    check_model_report,
+    ensure_model_report,
+    is_measured_accuracy,
+    merge_model_report,
+    model_overview_paths,
+    model_report_paths,
+    read_model_report,
+    render_model_report_file,
+    rewrite_model_report_html,
+    validate_model_report,
+    write_model_overview,
+    write_model_report,
 )
-
 __all__ = [
     "ACCURACY_SCENARIO",
     "ACCURACY_STATUSES",
@@ -91,6 +125,12 @@ __all__ = [
     "DEFAULT_MAX_DETS",
     "DEFAULT_WARN_AP",
     "INPUT_BUNDLE_KIND",
+    "MODEL_OVERVIEW_KIND",
+    "MODEL_OVERVIEW_STEM",
+    "MODEL_REPORT_HTML_SUFFIX",
+    "MODEL_REPORT_JSON_SUFFIX",
+    "MODEL_REPORT_KIND",
+    "MODEL_REPORT_SCHEMA_VERSION",
     "MODES",
     "PASS_IDS",
     "PASS_ORIGINS",
@@ -103,6 +143,11 @@ __all__ = [
     "THROUGHPUT_SCENARIO",
     "TIMING_SCOPES",
     "BenchmarkProtocol",
+    "ModelReportCheck",
+    "ModelReportIdentity",
+    "ModelReportPaths",
+    "ModelReportValidationError",
+    "ModelReportWriteResult",
     "ScoringError",
     "ScoringResult",
     "ScoringUnavailable",
@@ -111,24 +156,36 @@ __all__ = [
     "benchmark_report_paths",
     "build_benchmark_report",
     "build_index",
+    "build_model_overview",
+    "build_model_report",
     "build_run_summary",
     "canonical_json",
     "capabilities",
     "comparison_key",
     "describe",
-    "detect_machine",
-    "detect_software",
+    "detect_hardware",
+    "detect_libraries",
     "environment_id",
+    "ensure_model_report",
     "index_paths",
     "input_signature_id",
+    "is_measured_accuracy",
+    "merge_model_report",
+    "model_overview_paths",
+    "model_report_paths",
     "metrics_from_stats",
     "protocol_from_mapping",
     "render_benchmark_report_html",
     "render_index_html",
+    "render_model_overview_html",
+    "render_model_report_file",
+    "render_model_report_html",
     "render_run_summary_html",
     "rewrite_benchmark_report_html",
     "rewrite_summary_html",
     "runner_identity",
+    "read_model_report",
+    "rewrite_model_report_html",
     "sanitize_prediction_store",
     "score_accuracy",
     "score_predictions",
@@ -139,12 +196,17 @@ __all__ = [
     "validate_benchmark_report",
     "validate_benchmark_summary",
     "validate_input_bundle",
+    "validate_hardware",
+    "validate_libraries",
     "validate_metrics",
     "validate_performance",
+    "validate_model_report",
     "validate_prediction_record",
     "validate_predictions_store",
     "validate_protocol",
     "write_benchmark_report",
+    "write_model_overview",
+    "write_model_report",
     "write_index",
     "write_run_summary",
 ]

@@ -17,7 +17,7 @@ from typing import Any
 
 from report_core import sha256_file
 
-from .schema import (
+from ..schema import (
     COCO_STAT_KEYS,
     PASS_IDS,
     SCORING_MODES,

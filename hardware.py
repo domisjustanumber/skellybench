@@ -1,4 +1,4 @@
-"""Optional producer-side machine and software detection.
+"""Optional producer-side hardware and library-version detection.
 
 These helpers are conveniences for producers. Reports never substitute the local machine for a
 supplied identity, and imported reports are validated rather than re-detected.
@@ -9,8 +9,9 @@ from __future__ import annotations
 import ctypes
 import os
 import platform
+import re
 import subprocess
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from importlib.metadata import PackageNotFoundError, version
 from typing import Any
 
@@ -25,6 +26,11 @@ DEFAULT_SOFTWARE_PACKAGES = (
     "torch",
     "torchvision",
 )
+
+
+def _distribution_name(name: str) -> str:
+    """Return a PEP 503-style package key."""
+    return re.sub(r"[-_.]+", "-", name).lower()
 
 
 def _run(command: Sequence[str], timeout: float = 5.0) -> str:
@@ -58,9 +64,9 @@ def _gpu_inventory() -> list[dict[str, Any]]:
             inventory.append(
                 {
                     "index": int(parts[0]) if parts[0].isdigit() else len(inventory),
-                    "id": parts[1],
-                    "name": parts[2],
-                    "driver": parts[3],
+                    "id": parts[1] or "unknown",
+                    "name": parts[2] or "unknown",
+                    "driver": parts[3] or "unknown",
                     "vram_mb": int(parts[4].split()[0]) if parts[4].split() and parts[4].split()[0].isdigit() else None,
                     "vendor": "nvidia",
                 }
@@ -97,8 +103,8 @@ def _memory_total_mb() -> int | None:
         return None
 
 
-def detect_machine(*, label: str | None = None) -> dict[str, Any]:
-    """Detect the local machine. Missing values are omitted, never guessed."""
+def detect_hardware(*, label: str | None = None) -> dict[str, Any]:
+    """Detect local hardware. Missing values are omitted, never guessed."""
     gpus = _gpu_inventory()
     cpu_model = platform.processor() or platform.machine()
     logical = os.cpu_count()
@@ -147,27 +153,24 @@ def detect_machine(*, label: str | None = None) -> dict[str, Any]:
     return machine
 
 
-def detect_software(packages: Sequence[str] = DEFAULT_SOFTWARE_PACKAGES) -> dict[str, Any]:
-    """Capture runtime versions and any additional package versions."""
-    versions: dict[str, str] = {}
+def detect_libraries(packages: Iterable[str] = DEFAULT_SOFTWARE_PACKAGES) -> dict[str, Any]:
+    """Capture Python and installed package versions in the standard format."""
+    package_versions: dict[str, str] = {}
     for name in packages:
         try:
-            versions[name] = version(name)
+            package_versions[_distribution_name(name)] = version(name)
         except PackageNotFoundError:
-            versions[name] = "not installed"
-    onnxruntime = versions.get("onnxruntime")
-    if onnxruntime in (None, "not installed"):
-        onnxruntime = versions.get("onnxruntime-gpu", "not installed")
+            package_versions[_distribution_name(name)] = "not installed"
     return {
-        "python": platform.python_version(),
-        "onnxruntime": onnxruntime or "not installed",
-        "numpy": versions.get("numpy", "not installed"),
-        "faster_coco_eval": versions.get("faster-coco-eval", "not installed"),
-        "packages": versions,
+        "python": {
+            "implementation": platform.python_implementation(),
+            "version": platform.python_version(),
+        },
+        "packages": package_versions,
     }
 
 
-def runner_identity(*, label: str | None = None, machine_id: str | None = None) -> dict[str, Any]:
+def runner_identity(*, label: str | None = None, hardware_id: str | None = None) -> dict[str, Any]:
     """Return the runner identity used in a report."""
     try:
         user = os.getlogin()
@@ -178,25 +181,25 @@ def runner_identity(*, label: str | None = None, machine_id: str | None = None) 
         "label": label or user,
         "hostname": platform.node(),
     }
-    if machine_id:
-        identity["machine_id"] = machine_id
+    if hardware_id:
+        identity["hardware_id"] = hardware_id
     return identity
 
 
-def environment_id(machine: Mapping[str, Any], software: Mapping[str, Any]) -> str:
+def environment_id(hardware: Mapping[str, Any], libraries: Mapping[str, Any]) -> str:
     """Stable hash of OS, GPU driver, runtime, and EP versions."""
     payload = {
-        "os": machine.get("os"),
-        "gpus": machine.get("gpus"),
-        "software": software,
+        "os": hardware.get("os"),
+        "gpus": hardware.get("gpus"),
+        "libraries": libraries,
     }
     return "sha256:" + sha256_text(repr(payload))
 
 
 __all__ = [
     "DEFAULT_SOFTWARE_PACKAGES",
-    "detect_machine",
-    "detect_software",
+    "detect_hardware",
+    "detect_libraries",
     "environment_id",
     "runner_identity",
 ]
