@@ -252,6 +252,16 @@ The family overview puts a small marker next to the model. The note text is the 
 
 `model.variant` lets the family overview group models of any family.
 
+## Excluded stages
+
+`PerformanceProtocol(excluded_stages=("letterbox",))` names the stages that the timing leaves out.
+The default is an empty tuple.
+`protocol.block(batch_size=…)` writes the list to `protocol.excluded_stages`.
+The list is part of the protocol parameters, so it changes `protocol_id`.
+The validator checks that every entry is a non-empty string.
+The model page shows "excludes: letterbox" under the performance chart and in the performance table.
+The benchmark page shows the excluded stages in the protocol section.
+
 ## CUDA device probe
 
 `probes.local.cuda_devices()` calls the CUDA driver API through `ctypes`.

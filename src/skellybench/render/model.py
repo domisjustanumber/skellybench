@@ -42,6 +42,7 @@ class ChartPoint:
     hostname: str
     href: str
     newest: bool = False
+    excludes: tuple[str, ...] = ()
 
 
 def _row_labels(benchmarks: Sequence[LinkedBenchmark]) -> dict[str, str]:
@@ -80,6 +81,7 @@ def chart_points(benchmarks: Sequence[LinkedBenchmark]) -> list[ChartPoint]:
                     run_id=str(item.payload["run"]["run_id"]),
                     hostname=str(item.payload["host"]["hostname"]),
                     href=item.href,
+                    excludes=tuple((item.payload.get("protocol") or {}).get("excluded_stages") or ()),
                 )
             )
     newest = {}
@@ -164,6 +166,8 @@ def render_chart(points: Sequence[ChartPoint]) -> str:
         for point in sorted((p for p in points if p.row == row), key=lambda p: p.newest):
             css = f"{esc(point.mode)}{'' if point.newest else ' hollow'}"
             title = f"{point.run_id} · {point.hostname} · {point.mode} · {point.value:.2f} images/s"
+            if point.excludes:
+                title += f" · excludes: {', '.join(point.excludes)}"
             px = x(point.value)
             if MODE_SHAPES.get(point.mode) == "square":
                 shape = f'<rect class="{css}" x="{px - 5:.1f}" y="{center - 5:.1f}" width="10" height="10"/>'
@@ -176,7 +180,9 @@ def render_chart(points: Sequence[ChartPoint]) -> str:
         '<span class="swatch" style="background:var(--accent-2)"></span>host I/O'
         " · filled = newest run in the row · hollow = older runs · click a mark to open its report</div>"
     )
-    return legend + "".join(parts)
+    excluded = sorted({stage for point in points for stage in point.excludes})
+    note = (f'<p class="muted">The timing excludes: {esc(", ".join(excluded))}.</p>' if excluded else "")
+    return legend + "".join(parts) + note
 
 
 def _metric(snapshot: Mapping[str, Any], key: str) -> float | None:
@@ -333,9 +339,10 @@ def render_model_html(
     parts.append(render_chart(points))
     if points:
         parts.append(data_table(
-            ["Device", "Mode", "Images/s", "Run", "Host"],
+            ["Device", "Mode", "Images/s", "Run", "Host", "Excludes"],
             [
-                [esc(point.row), esc(point.mode), (fmt(point.value), point.value), link(point.href, point.run_id), esc(point.hostname)]
+                [esc(point.row), esc(point.mode), (fmt(point.value), point.value), link(point.href, point.run_id),
+                 esc(point.hostname), esc(", ".join(point.excludes)) if point.excludes else "none"]
                 for point in sorted(points, key=lambda p: (p.row, p.mode, p.run_id))
             ],
             sortable=True,

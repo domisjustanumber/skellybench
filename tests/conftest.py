@@ -128,10 +128,10 @@ def write_accuracy(family_dir: Path, ctx: dict[str, Any], subj: dict[str, Any], 
 
 
 def write_performance(family_dir: Path, ctx: dict[str, Any], subj: dict[str, Any], exe: dict[str, Any],
-                      ips: float = 100.0) -> Path:
+                      ips: float = 100.0, protocol: PerformanceProtocol | None = None) -> Path:
     report = build_benchmark_report(
         benchmark_type="performance", status="measured", execution=exe, subject=subj, dataset=dataset(),
-        protocol=PerformanceProtocol().block(batch_size=1),
+        protocol=(protocol or PerformanceProtocol()).block(batch_size=1),
         performance={"records": [
             {"mode": "device", "timing_scope": "session", "timing": {"images_per_second": ips}},
             {"mode": "host", "timing_scope": "session", "timing": {"images_per_second": ips * 0.8}},

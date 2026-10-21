@@ -29,6 +29,8 @@ This contract applies to every report that skellybench writes: schema version 3.
   `method.scorer.tool` must equal `accuracy.metrics.tool`.
   The protocol id does not cover `method`.
 - A report with `status` other than `measured` has a `reason` and no accuracy block.
+- A performance protocol has `excluded_stages`: the pipeline stages that the timing leaves out.
+  The list is part of the protocol id. The pages show it.
 - The `execution` block links the execution provider to the physical device.
   A GPU device carries the UUID of a `host.gpus` entry.
 

@@ -25,3 +25,6 @@ Plain-data API for exporters that collect data in another process.
 - Add `probes.local.cuda_devices()`. It uses the CUDA driver API through `ctypes` and returns
   `[{cuda_index, uuid, name, pci_bus_id}]`, or `None` without a driver. `local.collect()` includes it as
   `cuda_devices`.
+- `PerformanceProtocol` takes `excluded_stages`. The protocol block always has the list, and it
+  changes `protocol_id`. The performance chart, the performance table, and the benchmark page show it.
+  This changes the `protocol_id` of every performance protocol, also with an empty list.

@@ -244,3 +244,42 @@ def test_empty_notes_are_rejected(family: Path) -> None:
         broken[key] = 3
         with pytest.raises(SkellybenchValidationError, match=key):
             validate_model_report(broken)
+
+
+# --- change 7: excluded stages ----------------------------------------------------------------------
+
+from conftest import write_performance  # noqa: E402
+from skellybench.protocol import PerformanceProtocol  # noqa: E402
+
+
+def test_excluded_stages_enter_params_and_protocol_id() -> None:
+    plain = PerformanceProtocol().block(batch_size=1)
+    letterbox = PerformanceProtocol(excluded_stages=("letterbox",)).block(batch_size=1)
+    assert plain["excluded_stages"] == []
+    assert letterbox["excluded_stages"] == ["letterbox"]
+    assert plain["protocol_id"] != letterbox["protocol_id"]
+    assert PerformanceProtocol(excluded_stages=("letterbox",)).block(batch_size=1) == letterbox
+    with pytest.raises(ValueError):
+        PerformanceProtocol(excluded_stages="letterbox")
+    with pytest.raises(ValueError):
+        PerformanceProtocol(excluded_stages=("",))
+
+
+def test_pages_show_excluded_stages(family: Path) -> None:
+    from skellybench.schema import validate_protocol
+
+    _lineage(family)
+    later = context("20261021T090000Z-gerald")
+    protocol = PerformanceProtocol(excluded_stages=("letterbox",))
+    validate_protocol(protocol.block(batch_size=1))
+    broken = protocol.block(batch_size=1)
+    broken["excluded_stages"] = [""]
+    with pytest.raises(SkellybenchValidationError, match="excluded_stages"):
+        validate_protocol(broken)
+    write_performance(family, later, subject("rfdetr-nano_b1_fp32", sha("fp32")), execution(later["host"]), 130.0,
+                      protocol=protocol)
+    render_family(family)
+    model_html = (family / "rfdetr-nano_b1_fp32.model.html").read_text(encoding="utf-8")
+    assert "excludes: letterbox" in model_html
+    page = next((family / "benchmarks" / "rfdetr-nano_b1_fp32").glob(f"*performance.cuda.{later['run']['run_id']}.html"))
+    assert "letterbox" in page.read_text(encoding="utf-8")

@@ -47,6 +47,8 @@ class PerformanceProtocol:
     max_pass_seconds: float = 30.0
     cpu_threads: int = 0
     timing_scope: str = "session"
+    excluded_stages: tuple[str, ...] = ()
+    """Pipeline stages that the timing leaves out, for example ``("letterbox",)``."""
     version: int = 1
 
     def __post_init__(self) -> None:
@@ -58,6 +60,10 @@ class PerformanceProtocol:
             raise ValueError("pass durations are invalid")
         if self.timing_scope not in TIMING_SCOPES:
             raise ValueError(f"timing_scope must be one of {list(TIMING_SCOPES)}")
+        if isinstance(self.excluded_stages, str):
+            raise ValueError("excluded_stages must be a sequence of stage names, not one string")
+        if any(not isinstance(stage, str) or not stage for stage in self.excluded_stages):
+            raise ValueError("excluded_stages must hold non-empty strings")
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -69,6 +75,7 @@ class PerformanceProtocol:
             "max_pass_seconds": self.max_pass_seconds,
             "cpu_threads": self.cpu_threads,
             "timing_scope": self.timing_scope,
+            "excluded_stages": list(self.excluded_stages),
         }
 
     def block(self, *, batch_size: int) -> dict[str, Any]:

@@ -307,6 +307,8 @@ def validate_protocol(protocol: Any, path: str = "protocol") -> None:
     _str(block.get("protocol_id"), f"{path}.protocol_id")
     _one_of(block.get("benchmark_type"), f"{path}.benchmark_type", BENCHMARK_TYPES)
     _one_of(block.get("timing_scope"), f"{path}.timing_scope", TIMING_SCOPES)
+    for index, stage in enumerate(_sequence(block.get("excluded_stages", []), f"{path}.excluded_stages")):
+        _str(stage, f"{path}.excluded_stages[{index}]")
 
 
 def validate_metrics(metrics: Any, path: str = "metrics") -> None:

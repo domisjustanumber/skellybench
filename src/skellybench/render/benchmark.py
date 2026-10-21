@@ -202,6 +202,7 @@ def render_benchmark_html(
             ("Limit", esc(dataset.get("limit")) if dataset.get("limit") else "none"),
             ("Annotation SHA-256", f"<code>{esc(dataset.get('annotation_sha256'))}</code>"),
             ("Image list SHA-256", f"<code>{esc(dataset.get('image_list_sha256'))}</code>"),
+            ("Excluded stages", esc(", ".join((report.get("protocol") or {}).get("excluded_stages") or []) or "none")),
             ("Protocol", f"<code>{esc(report.get('protocol'))}</code>"),
         ]))
 
