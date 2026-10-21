@@ -17,3 +17,5 @@ Plain-data API for exporters that collect data in another process.
 - `validate_accuracy_pair` no longer requires an equal `run.run_id`.
   `build_model_report` takes `parent_run_id`, stored as `accuracy.parent_run_id`.
   The validator requires it when the parent ran in another run. The model page marks a reused parent.
+- `score_columns` and `score_predictions` take `category_ids`. The scorer sets `catIds` to them.
+  `ScoringResult.category_ids` holds the ids that it used.

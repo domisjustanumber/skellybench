@@ -154,3 +154,60 @@ def test_pair_still_compares_evaluation(family: Path) -> None:
     from skellybench.schema import validate_model_report
     with pytest.raises(SkellybenchValidationError, match="accuracy.evaluation"):
         validate_model_report(broken)
+
+
+# --- change 4: category filter ---------------------------------------------------------------------
+
+
+def _two_category_annotation(tmp_path: Path) -> Path:
+    import json
+
+    path = tmp_path / "two.json"
+    path.write_text(json.dumps({
+        "images": [{"id": 1, "width": 100, "height": 100, "file_name": "1.jpg"}],
+        "categories": [{"id": 1, "name": "person"}, {"id": 2, "name": "bicycle"}],
+        "annotations": [
+            {"id": 1, "image_id": 1, "category_id": 1, "bbox": [10.0, 10.0, 20.0, 20.0], "area": 400, "iscrowd": 0},
+            {"id": 2, "image_id": 1, "category_id": 2, "bbox": [60.0, 60.0, 20.0, 20.0], "area": 400, "iscrowd": 0},
+        ],
+    }), encoding="utf-8")
+    return path
+
+
+def test_category_filter_changes_ap_and_reports_used_ids(tmp_path: Path) -> None:
+    pytest.importorskip("faster_coco_eval")
+    from skellybench.scoring import ScoringError, score_predictions
+
+    annotation = _two_category_annotation(tmp_path)
+    # The person is found. The bicycle is missed (the box is in the wrong place).
+    records = [
+        {"image_id": 1, "category_id": 1, "bbox": [10.0, 10.0, 20.0, 20.0], "score": 0.9},
+        {"image_id": 1, "category_id": 2, "bbox": [0.0, 0.0, 5.0, 5.0], "score": 0.8},
+    ]
+    everything = score_predictions(records, annotation, image_ids=[1])
+    person = score_predictions(records, annotation, image_ids=[1], category_ids=[1])
+    bicycle = score_predictions(records, annotation, image_ids=[1], category_ids=[2])
+    assert everything.category_ids == (1, 2)
+    assert person.category_ids == (1,)
+    assert person.metrics["ap"] == pytest.approx(1.0)
+    assert everything.metrics["ap"] == pytest.approx(0.5)
+    assert bicycle.metrics["ap"] == pytest.approx(0.0)
+    with pytest.raises(ScoringError, match="not in the annotation"):
+        score_predictions(records, annotation, image_ids=[1], category_ids=[9])
+    with pytest.raises(ScoringError, match="empty"):
+        score_predictions(records, annotation, image_ids=[1], category_ids=[])
+
+
+def test_score_columns_takes_category_ids(tmp_path: Path) -> None:
+    pytest.importorskip("faster_coco_eval")
+    from skellybench.predictions import columns_from_records
+    from skellybench.scoring import score_columns
+
+    annotation = _two_category_annotation(tmp_path)
+    records = [
+        {"image_id": 1, "category_id": 1, "bbox": [10.0, 10.0, 20.0, 20.0], "score": 0.9},
+        {"image_id": 1, "category_id": 2, "bbox": [0.0, 0.0, 5.0, 5.0], "score": 0.8},
+    ]
+    columns = columns_from_records(records, [1])
+    assert score_columns(columns, annotation, category_ids=[1]).metrics["ap"] == pytest.approx(1.0)
+    assert score_columns(columns, annotation).metrics["ap"] == pytest.approx(0.5)

@@ -244,6 +244,15 @@ The model page also shows the `method` of `self` and of `parent` side by side.
 
 `model.variant` lets the family overview group models of any family.
 
+## Category filter
+
+`score_columns(columns, annotation, category_ids=None)` and
+`score_predictions(predictions, annotation, category_ids=None)` score every ground-truth category by default.
+Pass `category_ids=[1]` for person-only AP. The scorer sets `catIds` to the sorted ids.
+It raises `ScoringError` when the list is empty or holds an id that is not in the annotation file.
+`ScoringResult.category_ids` holds the ids that the scorer used.
+Store them in `accuracy.evaluation.category_ids`, so that a pair compares them.
+
 ## API
 
 | Function | Module | Purpose |
@@ -254,7 +263,7 @@ The model page also shows the `method` of `self` and of `parent` side by side.
 | `make_run_id`, `benchmark_report_id`, `ep_slug` | `paths` | Names |
 | `PerformanceProtocol`, `accuracy_protocol` | `protocol` | Protocol blocks with stable IDs |
 | `encode_columns`, `columns_from_records`, `read_predictions_file` | `predictions` | Predictions files |
-| `score_columns`, `score_predictions`, `compare_metrics` | `scoring` | COCO metrics and comparisons |
+| `score_columns`, `score_predictions`, `compare_metrics` | `scoring` | COCO metrics and comparisons. Both scorers take `category_ids`. |
 | `build_benchmark_report`, `write_benchmark_predictions`, `write_benchmark_report` | `reports` | Benchmark reports |
 | `accuracy_entry`, `build_model_report`, `write_model_report`, `supersede_model_report` | `reports` | Model reports |
 | `scan_family`, `read_model_report` | `reports` | Read the reports on disk |

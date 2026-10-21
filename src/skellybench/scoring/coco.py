@@ -39,6 +39,8 @@ class ScoringResult:
     annotation_sha256: str
     tool: str = SCORING_TOOL
     version: str = ""
+    category_ids: tuple[int, ...] = ()
+    """The sorted category ids that the run scored. Record them in ``accuracy.evaluation.category_ids``."""
 
     def as_scorer_block(self) -> dict[str, Any]:
         """Return the ``accuracy.method.scorer`` block: ``{tool, version}``."""
@@ -72,6 +74,7 @@ def score_predictions(
     *,
     image_ids: Sequence[int] | None = None,
     max_dets: int = DEFAULT_MAX_DETS,
+    category_ids: Sequence[int] | None = None,
 ) -> ScoringResult:
     """Score COCO detection results against an annotation file.
 
@@ -81,6 +84,9 @@ def score_predictions(
         annotation_path: COCO ground-truth JSON.
         image_ids: restrict evaluation to these images (the images the run evaluated).
         max_dets: per-image detection cap. Must be ``100`` so the twelve statistics keep their slots.
+        category_ids: score only these categories (for example ``[1]`` for person-only AP).
+            ``None`` scores every ground-truth category. The result holds the ids that were used in
+            ``ScoringResult.category_ids``. Record them in ``accuracy.evaluation.category_ids``.
     """
     if max_dets != DEFAULT_MAX_DETS:
         raise ScoringError("max_dets must be 100 for the twelve named COCO statistics")
@@ -110,7 +116,14 @@ def score_predictions(
             else [int(image_id) for image_id in coco_gt.getImgIds()]
         )
         evaluator.params.imgIds = allowed
-        evaluator.params.catIds = [int(category_id) for category_id in coco_gt.getCatIds()]
+        known = {int(category_id) for category_id in coco_gt.getCatIds()}
+        used = sorted({int(category_id) for category_id in category_ids}) if category_ids is not None else sorted(known)
+        if not used:
+            raise ScoringError("category_ids must not be empty")
+        unknown = [category_id for category_id in used if category_id not in known]
+        if unknown:
+            raise ScoringError(f"category_ids {unknown} are not in the annotation file")
+        evaluator.params.catIds = used
         evaluator.evaluate()
         evaluator.accumulate()
         evaluator.summarize()
@@ -124,6 +137,7 @@ def score_predictions(
         images_evaluated=len(allowed),
         annotation_sha256=sha256_file(annotation),
         version=_package_version(SCORING_TOOL),
+        category_ids=tuple(used),
     )
 
 
@@ -132,13 +146,18 @@ def score_columns(
     annotation_path: str | Path,
     *,
     max_dets: int = DEFAULT_MAX_DETS,
+    category_ids: Sequence[int] | None = None,
 ) -> ScoringResult:
-    """Score decoded predictions columns over exactly their own image ids."""
+    """Score decoded predictions columns over exactly their own image ids.
+
+    *category_ids* restricts scoring to these categories. See :func:`score_predictions`.
+    """
     return score_predictions(
         columns.to_numpy(),
         annotation_path,
         image_ids=columns.image_ids,
         max_dets=max_dets,
+        category_ids=category_ids,
     )
 
 

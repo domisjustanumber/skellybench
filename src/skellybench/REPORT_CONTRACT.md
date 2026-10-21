@@ -50,6 +50,8 @@ This contract applies to every report that skellybench writes: schema version 3.
 - Record `data_sha256` of the decoded bytes.
 - Write the predictions file before you score. Score the decoded file content.
 - Renderers do not open predictions files.
+- To score a subset of categories, pass `category_ids` to the scorer.
+  Record `ScoringResult.category_ids` in `accuracy.evaluation.category_ids`.
 
 ## Model reports
 
