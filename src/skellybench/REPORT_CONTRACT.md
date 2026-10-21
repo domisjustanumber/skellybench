@@ -27,6 +27,16 @@ This contract applies to every report that skellybench writes: schema version 3.
 - The `execution` block links the execution provider to the physical device.
   A GPU device carries the UUID of a `host.gpus` entry.
 
+## Environments
+
+- Build the `environment` block of a local process from the probes with `build_environment`.
+- Build the `environment` block of another process, for example a Docker container, with
+  `build_external_environment`.
+- An external environment has `collected_by` and `container`.
+  `container` holds `image`, `tag`, `digest`, `dockerfile_sha256`, and `published`.
+- The fingerprint of an external environment covers `collected_by` and `container`.
+- `container.digest` is `sha256:` plus 64 hex characters. `container.dockerfile_sha256` is 64 hex characters.
+
 ## Predictions files
 
 - Write one predictions file for each accuracy report: `<report_id>.predictions.json`.

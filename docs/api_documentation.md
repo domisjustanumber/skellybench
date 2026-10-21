@@ -93,6 +93,36 @@ In a container, `container` holds `runtime`, `container_id`, `image`, `image_dig
 `packages` holds every installed distribution. `package_sources` holds only packages that were not
 installed from an index.
 
+#### External environment
+
+Another process can collect an environment, for example a Docker container.
+`probes` did not run there. Build the block with `blocks.build_external_environment`:
+
+```python
+environment = blocks.build_external_environment(
+    python={"implementation": "CPython", "version": "3.8.20"},
+    packages={"torch": "2.0.0", "mmdet": "3.1.0"},
+    package_sources=None,
+    container={"image": "domscott/openmmlab-exporter", "tag": "df-0123456789ab",
+               "digest": "sha256:…", "dockerfile_sha256": "…", "published": True},
+    collected_by="exporter:docker",
+)
+```
+
+The block has the normal fields plus two more:
+
+| Field | Meaning |
+|---|---|
+| `collected_by` | Who collected the data, for example `"exporter:docker"`. A string. |
+| `container` | `{image, tag, digest, dockerfile_sha256, published}`, or `null`. |
+
+`digest` is `sha256:` plus 64 lowercase hex characters, or `null`.
+`dockerfile_sha256` is 64 lowercase hex characters, or `null`.
+`published` is a boolean.
+`environment_fingerprint` covers every field of the block.
+The validator accepts both fields on any `environment` block.
+The benchmark page shows `collected_by` and the container image.
+
 ### `execution`
 
 ```json
@@ -189,6 +219,7 @@ Set `per_image` when every image has the same count. Else set `counts`, one coun
 |---|---|---|
 | `local.collect()`, `docker.collect()` | `probes` | Probe the machine and the container |
 | `build_run`, `build_producer`, `build_host`, `build_environment`, `build_execution` | `blocks` | Build the shared blocks |
+| `build_external_environment` | `blocks` | Build an `environment` block that another process collected |
 | `make_run_id`, `benchmark_report_id`, `ep_slug` | `paths` | Names |
 | `PerformanceProtocol`, `accuracy_protocol` | `protocol` | Protocol blocks with stable IDs |
 | `encode_columns`, `columns_from_records`, `read_predictions_file` | `predictions` | Predictions files |

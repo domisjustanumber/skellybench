@@ -27,6 +27,16 @@ def reproduction_rows(run: Mapping[str, Any], environment: Mapping[str, Any], ex
     if producer.get("git_dirty"):
         rows.append(("Uncommitted diff SHA-256", f'<code>{esc(producer.get("git_diff_sha256"))}</code>'))
     rows.append(("Lock file SHA-256", f'<code>{esc(producer.get("lock_file_sha256"))}</code>'))
+    if environment.get("collected_by"):
+        rows.append(("Environment collected by", esc(environment["collected_by"])))
+    container = environment.get("container")
+    if container:
+        tag = f":{container['tag']}" if container.get("tag") else ""
+        digest = f" <code>{esc(container['digest'])}</code>" if container.get("digest") else ""
+        rows.append(("Container image", f"{esc(container.get('image'))}{esc(tag)}{digest}"
+                     f" · {'published' if container.get('published') else 'not published'}"))
+        if container.get("dockerfile_sha256"):
+            rows.append(("Dockerfile SHA-256", f"<code>{esc(container['dockerfile_sha256'])}</code>"))
     rows.append(("Python", f"{esc(python.get('implementation'))} {esc(python.get('version'))}"))
     names = [name for name in (*extra_packages, *KEY_PACKAGES) if name in packages]
     if names:

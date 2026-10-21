@@ -154,6 +154,65 @@ def build_environment(local: Mapping[str, Any], host: Mapping[str, Any]) -> dict
     return environment
 
 
+def build_external_environment(
+    *,
+    python: Mapping[str, Any],
+    packages: Mapping[str, str],
+    package_sources: Mapping[str, Any] | None = None,
+    container: Mapping[str, Any] | None = None,
+    collected_by: str,
+) -> dict[str, Any]:
+    """Return an ``environment`` block for an environment that the caller collected in another process.
+
+    Use it for a Docker container, where :mod:`skellybench.probes` did not run. The block has the
+    normal ``python``, ``packages`` and ``package_sources`` fields, and two more:
+
+    - ``collected_by``: who collected the data, for example ``"exporter:docker"``.
+    - ``container``: ``{image, tag, digest, dockerfile_sha256, published}``, or ``None``.
+
+    ``environment_fingerprint`` covers every field.
+    """
+    if not collected_by or not isinstance(collected_by, str):
+        raise ValueError("collected_by must be a non-empty string")
+    entry: dict[str, Any] | None = None
+    if container is not None:
+        entry = {
+            "image": container.get("image"),
+            "tag": container.get("tag"),
+            "digest": container.get("digest"),
+            "dockerfile_sha256": container.get("dockerfile_sha256"),
+            "published": bool(container.get("published", False)),
+        }
+    environment: dict[str, Any] = {
+        "python": dict(python),
+        "packages": {str(name).lower(): str(version) for name, version in packages.items()},
+        "package_sources": dict(package_sources or {}),
+        "collected_by": collected_by,
+        "container": entry,
+    }
+    environment["environment_fingerprint"] = fingerprint(environment)
+    return environment
+
+
+def build_accuracy_method(
+    *,
+    decode: Mapping[str, Any],
+    scorer_tool: str,
+    scorer_version: str | None,
+    scored_by: str,
+) -> dict[str, Any]:
+    """Return an ``accuracy.method`` block: how this pass decoded its output and who scored it.
+
+    *scorer_tool* must equal ``accuracy.metrics.tool``. *scored_by* is ``"skellybench"`` or
+    ``"source_tool"``.
+    """
+    return {
+        "decode": dict(decode),
+        "scorer": {"tool": scorer_tool, "version": scorer_version},
+        "scored_by": scored_by,
+    }
+
+
 def find_gpu(host: Mapping[str, Any], uuid: str | None) -> Mapping[str, Any] | None:
     """Return the ``host.gpus`` entry with *uuid*, or ``None``."""
     if not uuid:
@@ -243,8 +302,10 @@ def describe_container_limits(host: Mapping[str, Any]) -> Sequence[str]:
 
 
 __all__ = [
+    "build_accuracy_method",
     "build_environment",
     "build_execution",
+    "build_external_environment",
     "build_host",
     "build_producer",
     "build_run",

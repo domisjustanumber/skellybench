@@ -221,7 +221,11 @@ def validate_host(host: Any, path: str = "host") -> None:
 
 
 def validate_environment(environment: Any, path: str = "environment") -> None:
-    """Validate an ``environment`` block."""
+    """Validate an ``environment`` block.
+
+    An external environment (see ``blocks.build_external_environment``) also has ``collected_by`` and
+    ``container``. Both are optional here.
+    """
     block = _mapping(environment, path)
     python = _mapping(block.get("python"), f"{path}.python")
     _str(python.get("version"), f"{path}.python.version")
@@ -231,6 +235,15 @@ def validate_environment(environment: Any, path: str = "environment") -> None:
             raise _error(f"{path}.packages", f"key {name!r} must be a lowercase distribution name")
         _str(version, f"{path}.packages.{name}")
     _mapping(block.get("package_sources", {}), f"{path}.package_sources")
+    _optional_str(block.get("collected_by"), f"{path}.collected_by")
+    container = _optional_mapping(block.get("container"), f"{path}.container")
+    if container is not None:
+        _str(container.get("image"), f"{path}.container.image")
+        _optional_str(container.get("tag"), f"{path}.container.tag")
+        if container.get("digest") is not None:
+            _fingerprint(container["digest"], f"{path}.container.digest")
+        _optional_sha256(container.get("dockerfile_sha256"), f"{path}.container.dockerfile_sha256")
+        _bool(container.get("published"), f"{path}.container.published")
     _fingerprint(block.get("environment_fingerprint"), f"{path}.environment_fingerprint")
 
 
