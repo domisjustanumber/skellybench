@@ -11,6 +11,7 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 
 from .protocol import fingerprint
+from .schema import MODEL_DATASET_KEYS
 
 _TRADEMARKS = re.compile(r"\((?:R|TM|tm|r)\)")
 _CPU_NOISE = re.compile(
@@ -211,6 +212,18 @@ def build_accuracy_method(
         "scorer": {"tool": scorer_tool, "version": scorer_version},
         "scored_by": scored_by,
     }
+
+
+def build_model_dataset(snapshot_dataset: Mapping[str, Any], **overrides: Any) -> dict[str, Any]:
+    """Return the model report ``dataset`` block from the ``dataset`` block of its accuracy pass.
+
+    The block has the keys of :data:`skellybench.schema.MODEL_DATASET_KEYS` that *snapshot_dataset*
+    has. *overrides* add or replace keys, for example ``split="val2017"`` when the accuracy pass did
+    not record the split. The validator checks that each shared key equals the accuracy pass.
+    """
+    block = {key: snapshot_dataset[key] for key in MODEL_DATASET_KEYS if key in snapshot_dataset}
+    block.update(overrides)
+    return block
 
 
 def find_gpu(host: Mapping[str, Any], uuid: str | None) -> Mapping[str, Any] | None:

@@ -136,9 +136,21 @@ def subject(subject_id: str, artifact_sha: str, *, batch_agnostic: bool = False,
     }
 
 
+PERSON = [{"id": 1, "name": "person"}]
+
+
 def dataset() -> dict[str, Any]:
-    return {"name": "coco-val2017", "annotation_sha256": sha("annotations"), "image_list_sha256": sha("images"),
+    """The dataset of an accuracy pass."""
+    return {"name": "coco-val2017", "split": "val2017", "annotation_file": "instances_val2017.json",
+            "categories": PERSON, "annotation_sha256": sha("annotations"), "image_list_sha256": sha("images"),
             "images_available": 2, "images_used": 2, "selection": "all", "limit": None}
+
+
+def performance_dataset() -> dict[str, Any]:
+    """The dataset of a performance pass. It reads no annotations."""
+    return {"name": "coco-val2017", "split": "val2017", "annotation_file": None, "categories": None,
+            "annotation_sha256": None, "image_list_sha256": sha("images"),
+            "images_available": 5000, "images_used": 120, "selection": "stride sample of 120", "limit": None}
 
 
 def metrics(ap: float) -> dict[str, Any]:
@@ -172,8 +184,8 @@ def write_performance(family_dir: Path, ctx: dict[str, Any], subj: dict[str, Any
     protocol = protocol or performance_protocol()
     letterbox = "letterbox" in protocol.excluded_stages
     report = build_benchmark_report(
-        benchmark_type="performance", status="measured", execution=exe, subject=subj, dataset=dataset(),
-        protocol=protocol.block(batch_size=1),
+        benchmark_type="performance", status="measured", execution=exe, subject=subj,
+        dataset=performance_dataset(), protocol=protocol.block(batch_size=1),
         performance={"records": [
             {"mode": "device", "timing_scope": "session",
              "timing": stage_timing(ips, letterbox=letterbox, decode_provider=decode_provider)},

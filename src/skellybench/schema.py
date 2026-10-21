@@ -35,6 +35,19 @@ MODES = ("device", "host")
 TIMING_SCOPES = ("session", "end_to_end")
 TIMED_STAGES = ("preprocess", "inference", "postprocess")
 """The stages of ``timing.stages_ms_per_image``, in pipeline order."""
+MODEL_DATASET_KEYS = (
+    "name",
+    "split",
+    "annotation_file",
+    "categories",
+    "images_used",
+    "images_available",
+    "selection",
+    "limit",
+    "annotation_sha256",
+    "image_list_sha256",
+)
+"""The keys of the model report ``dataset`` block. ``limit`` and ``images_available`` can be ``null``."""
 PREDICTIONS_FORMAT = "coco_detections_columnar_v1"
 
 COCO_STAT_KEYS = (
@@ -302,16 +315,58 @@ def validate_input(value: Any, path: str = "input") -> None:
     _int(block.get("height"), f"{path}.height", minimum=1)
 
 
-def validate_dataset(dataset: Any, path: str = "dataset") -> None:
-    """Validate a ``dataset`` block."""
+def validate_categories(categories: Any, path: str = "categories") -> None:
+    """Validate a non-empty list of ``{id, name}`` categories with unique ids."""
+    entries = _sequence(categories, path)
+    if not entries:
+        raise _error(path, "must not be empty")
+    seen: set[int] = set()
+    for index, item in enumerate(entries):
+        entry = _mapping(item, f"{path}[{index}]")
+        category_id = _int(entry.get("id"), f"{path}[{index}].id")
+        _str(entry.get("name"), f"{path}[{index}].name")
+        if category_id in seen:
+            raise _error(f"{path}[{index}].id", f"duplicate category id {category_id}")
+        seen.add(category_id)
+
+
+def validate_dataset(dataset: Any, path: str = "dataset", *, benchmark_type: str | None = None) -> None:
+    """Validate a ``dataset`` block.
+
+    ``name``, ``image_list_sha256``, ``images_used`` and ``selection`` are always required. ``split`` is
+    optional. An accuracy pass reads annotations, so for ``benchmark_type="accuracy"`` the
+    ``annotation_file``, ``categories`` and ``annotation_sha256`` are required. A performance pass reads
+    no annotations: these three fields can be ``null`` or absent. When present, they are checked.
+    """
     block = _mapping(dataset, path)
     _str(block.get("name"), f"{path}.name")
-    _optional_sha256(block.get("annotation_sha256"), f"{path}.annotation_sha256")
+    _optional_str(block.get("split"), f"{path}.split")
+    if benchmark_type == ACCURACY:
+        _str(block.get("annotation_file"), f"{path}.annotation_file")
+        validate_categories(block.get("categories"), f"{path}.categories")
+        _sha256(block.get("annotation_sha256"), f"{path}.annotation_sha256")
+    else:
+        _optional_str(block.get("annotation_file"), f"{path}.annotation_file")
+        if block.get("categories") is not None:
+            validate_categories(block["categories"], f"{path}.categories")
+        _optional_sha256(block.get("annotation_sha256"), f"{path}.annotation_sha256")
     _sha256(block.get("image_list_sha256"), f"{path}.image_list_sha256")
     _optional_int(block.get("images_available"), f"{path}.images_available")
     _int(block.get("images_used"), f"{path}.images_used", minimum=1)
     _str(block.get("selection"), f"{path}.selection")
     _optional_int(block.get("limit"), f"{path}.limit", minimum=1)
+
+
+def validate_model_dataset(dataset: Any, path: str = "dataset") -> None:
+    """Validate the model report ``dataset`` block: an accuracy dataset with a required ``split``.
+
+    Only the keys of :data:`MODEL_DATASET_KEYS` are allowed.
+    """
+    validate_dataset(dataset, path, benchmark_type=ACCURACY)
+    _str(dataset.get("split"), f"{path}.split")
+    for key in dataset:
+        if key not in MODEL_DATASET_KEYS:
+            raise _error(path, f"key {key!r} must be one of {list(MODEL_DATASET_KEYS)}")
 
 
 def validate_stage_definitions(
@@ -500,7 +555,7 @@ def validate_benchmark_report(payload: Any) -> None:
     validate_execution(document.get("execution"), "$.execution")
     validate_subject(document.get("subject"), "$.subject")
     if status == "measured":
-        validate_dataset(document.get("dataset"), "$.dataset")
+        validate_dataset(document.get("dataset"), "$.dataset", benchmark_type=benchmark_type)
         validate_protocol(document.get("protocol"), "$.protocol")
         if document["protocol"]["benchmark_type"] != benchmark_type:
             raise _error("$.protocol.benchmark_type", "must equal $.benchmark_type")
@@ -664,6 +719,12 @@ def validate_model_report(payload: Any) -> None:
 
     accuracy = _mapping(document.get("accuracy"), "$.accuracy")
     self_snapshot = _validate_accuracy_entry(accuracy.get("self"), "$.accuracy.self")
+    dataset = document.get("dataset")
+    validate_model_dataset(dataset, "$.dataset")
+    self_dataset = self_snapshot["dataset"]
+    for key, value in dataset.items():
+        if key in self_dataset and self_dataset[key] != value:
+            raise _error(f"$.dataset.{key}", f"must equal $.accuracy.self.snapshot.dataset.{key} ({self_dataset[key]!r})")
     if (self_snapshot.get("subject") or {}).get("artifact", {}).get("sha256") != artifact["sha256"]:
         raise _error("$.accuracy.self.snapshot.subject.artifact.sha256", "must equal $.model.artifact.sha256")
     if self_snapshot["subject"].get("model_report_id") != report_id:
@@ -709,6 +770,7 @@ __all__ = [
     "EP_SLUG_PATTERN",
     "FINGERPRINT_PATTERN",
     "HOSTNAME_SLUG_PATTERN",
+    "MODEL_DATASET_KEYS",
     "MODEL_REPORT_KIND",
     "MODES",
     "PERFORMANCE",
@@ -728,6 +790,7 @@ __all__ = [
     "reject_local_paths",
     "validate_accuracy_pair",
     "validate_benchmark_report",
+    "validate_categories",
     "validate_comparison",
     "validate_dataset",
     "validate_environment",
@@ -736,6 +799,7 @@ __all__ = [
     "validate_input",
     "validate_method",
     "validate_metrics",
+    "validate_model_dataset",
     "validate_model_report",
     "validate_predictions_header",
     "validate_predictions_reference",

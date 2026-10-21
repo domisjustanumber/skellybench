@@ -16,6 +16,7 @@ from typing import Any
 from ._internal.hashing import sha256_file
 from ._internal.io import read_json, write_json_once
 from ._internal.timestamps import iso_now
+from .blocks import build_model_dataset
 from .paths import (
     BENCHMARKS_DIR,
     MODEL_JSON_SUFFIX,
@@ -148,6 +149,7 @@ def build_model_report(
     model: Mapping[str, Any],
     creation: Mapping[str, Any],
     accuracy_self: Mapping[str, Any],
+    dataset: Mapping[str, Any] | None = None,
     accuracy_parent: Mapping[str, Any] | None = None,
     comparison: Mapping[str, Any] | None = None,
     parent_run_id: str | None = None,
@@ -161,9 +163,16 @@ def build_model_report(
     *created_run_id*. It must equal the parent snapshot's ``run.run_id``. Leave it ``None`` when the
     parent ran in the same run.
 
+    *dataset* is the top-level ``dataset`` block. When it is ``None``, it is built from the dataset of
+    *accuracy_self* with :func:`skellybench.blocks.build_model_dataset`. The block needs ``split``,
+    ``annotation_file`` and ``categories``. Each key it shares with the dataset of *accuracy_self* must
+    be equal.
+
     *accuracy_notes* and *performance_notes* are optional text for readers. A note must be a non-empty
     string. The model page shows them, and the family overview marks the model.
     """
+    if dataset is None:
+        dataset = build_model_dataset((accuracy_self.get("snapshot") or {}).get("dataset") or {})
     payload = {
         "schema_version": SCHEMA_VERSION,
         "kind": MODEL_REPORT_KIND,
@@ -171,6 +180,7 @@ def build_model_report(
         "created_run_id": created_run_id,
         "generated_at": _timestamp(generated_at),
         "model": dict(model),
+        "dataset": dict(dataset),
         "creation": dict(creation),
         "accuracy": {
             "self": dict(accuracy_self),
