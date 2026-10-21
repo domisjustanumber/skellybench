@@ -283,3 +283,21 @@ def test_pages_show_excluded_stages(family: Path) -> None:
     assert "excludes: letterbox" in model_html
     page = next((family / "benchmarks" / "rfdetr-nano_b1_fp32").glob(f"*performance.cuda.{later['run']['run_id']}.html"))
     assert "letterbox" in page.read_text(encoding="utf-8")
+
+
+# --- change 8: capabilities -------------------------------------------------------------------------
+
+
+def test_capabilities_list_every_plain_data_feature(capsys: pytest.CaptureFixture[str]) -> None:
+    import json
+
+    from skellybench import supports
+    from skellybench.__main__ import main
+
+    for feature in ("environment.external", "accuracy.method", "pairs.cross_run", "scoring.category_ids",
+                    "model_report.notes", "probes.cuda_devices", "protocol.excluded_stages"):
+        assert supports(feature), feature
+    assert not supports("pairs.same_run_only")
+    assert main(["capabilities"]) == 0
+    data = json.loads(capsys.readouterr().out)
+    assert data["environment"]["external"] is True and data["accuracy"]["scored_by"] == ["skellybench", "source_tool"]

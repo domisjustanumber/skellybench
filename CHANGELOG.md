@@ -28,3 +28,6 @@ Plain-data API for exporters that collect data in another process.
 - `PerformanceProtocol` takes `excluded_stages`. The protocol block always has the list, and it
   changes `protocol_id`. The performance chart, the performance table, and the benchmark page show it.
   This changes the `protocol_id` of every performance protocol, also with an empty list.
+- `python -m skellybench capabilities` reports `environment.external`, `accuracy.method`,
+  `pairs.cross_run`, `scoring.category_ids`, `model_report.notes`, `probes.cuda_devices`, and
+  `protocol.excluded_stages`. It also reports the package version.

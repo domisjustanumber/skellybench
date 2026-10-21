@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from importlib.metadata import PackageNotFoundError, version
 from typing import Any
 
 from .schema import (
@@ -11,18 +12,33 @@ from .schema import (
     PREDICTIONS_FORMAT,
     REPORT_KINDS,
     SCHEMA_VERSION,
+    SCORED_BY,
     TIMING_SCOPES,
 )
+
+
+def _package_version() -> str | None:
+    try:
+        return version("skellybench")
+    except PackageNotFoundError:
+        return None
 
 
 def capabilities() -> dict[str, Any]:
     """Return the capability contract as plain data."""
     return {
         "name": "skellybench",
+        "version": _package_version(),
         "schema_version": SCHEMA_VERSION,
         "report_kinds": list(REPORT_KINDS),
         "benchmark_types": list(BENCHMARK_TYPES),
         "performance": {"modes": list(MODES), "timing_scopes": list(TIMING_SCOPES)},
+        "protocol": {"excluded_stages": True},
+        "environment": {"external": True},
+        "accuracy": {"method": True, "scored_by": list(SCORED_BY)},
+        "pairs": {"cross_run": True},
+        "scoring": {"category_ids": True},
+        "model_report": {"notes": True},
         "predictions": {"format": PREDICTIONS_FORMAT, "encoding": "gzip+base64", "separate_file": True},
         "metrics": {"metric_keys": list(COCO_STAT_KEYS), "tool": "faster-coco-eval"},
         "reports": {
@@ -31,7 +47,11 @@ def capabilities() -> dict[str, Any]:
             "one_benchmark_file_per_execution_provider": True,
             "run_summary_has_json": False,
         },
-        "probes": {"local": "skellybench.probes.local", "docker": "skellybench.probes.docker"},
+        "probes": {
+            "local": "skellybench.probes.local",
+            "docker": "skellybench.probes.docker",
+            "cuda_devices": True,
+        },
         "optional_dependencies": {"scoring": "faster-coco-eval"},
     }
 

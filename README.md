@@ -41,7 +41,7 @@ Paths are relative to `src/skellybench/`.
 |---|---|
 | `schema.py` | Schema version 3 constants and validators |
 | `paths.py` | File layout, naming, run IDs, and the link rule |
-| `blocks.py` | Builds the `run`, `host`, `environment`, and `execution` blocks from probe data |
+| `blocks.py` | Builds the `run`, `host`, `environment` (also for another process), `execution`, and `method` blocks |
 | `protocol.py` | Protocol blocks and stable IDs |
 | `predictions.py` | Columnar gzip+base64 predictions files |
 | `reports.py` | Builds, writes, supersedes, and scans reports |
@@ -87,6 +87,10 @@ In a container, set these variables, because a container cannot see its own imag
 python -m skellybench capabilities
 python -m skellybench capabilities --format text
 ```
+
+The JSON lists the features of this version. Check one with `skellybench.supports("pairs.cross_run")`.
+Version 0.3.0 reports `environment.external`, `accuracy.method`, `pairs.cross_run`,
+`scoring.category_ids`, `model_report.notes`, `probes.cuda_devices`, and `protocol.excluded_stages`.
 
 ## Development
 
