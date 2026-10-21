@@ -13,6 +13,7 @@ from .schema import (
     REPORT_KINDS,
     SCHEMA_VERSION,
     SCORED_BY,
+    TIMED_STAGES,
     TIMING_SCOPES,
 )
 
@@ -32,13 +33,22 @@ def capabilities() -> dict[str, Any]:
         "schema_version": SCHEMA_VERSION,
         "report_kinds": list(REPORT_KINDS),
         "benchmark_types": list(BENCHMARK_TYPES),
-        "performance": {"modes": list(MODES), "timing_scopes": list(TIMING_SCOPES)},
-        "protocol": {"excluded_stages": True},
+        "performance": {
+            "modes": list(MODES),
+            "timing_scopes": list(TIMING_SCOPES),
+            "stage_timings": True,
+            "stages": list(TIMED_STAGES),
+            "stage_providers": True,
+            "excluded_ms_per_image": True,
+        },
+        "protocol": {"excluded_stages": True, "stage_definitions": True},
+        "dataset": {"annotation_file": True, "categories": True},
         "environment": {"external": True},
         "accuracy": {"method": True, "scored_by": list(SCORED_BY)},
         "pairs": {"cross_run": True},
         "scoring": {"category_ids": True},
-        "model_report": {"notes": True},
+        "model_report": {"notes": True, "dataset": True},
+        "render": {"stage_breakdown": True, "key_value_blocks": True},
         "predictions": {"format": PREDICTIONS_FORMAT, "encoding": "gzip+base64", "separate_file": True},
         "metrics": {"metric_keys": list(COCO_STAT_KEYS), "tool": "faster-coco-eval"},
         "reports": {

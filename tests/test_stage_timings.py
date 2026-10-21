@@ -179,3 +179,14 @@ def test_accuracy_report_with_measured_stages_needs_definitions(family) -> None:
         "preprocess": 10.0, "inference": 10.0, "postprocess": 4.0}
     with pytest.raises(SkellybenchValidationError, match="stage_definitions.host"):
         validate_benchmark_report(report)
+
+
+def test_capabilities_list_the_0_4_0_features() -> None:
+    from skellybench import capabilities, supports
+
+    for feature in ("performance.stage_timings", "performance.stage_providers", "performance.excluded_ms_per_image",
+                    "protocol.stage_definitions", "dataset.annotation_file", "dataset.categories",
+                    "model_report.dataset", "render.stage_breakdown", "render.key_value_blocks"):
+        assert supports(feature), feature
+    assert capabilities()["performance"]["stages"] == ["preprocess", "inference", "postprocess"]
+    assert capabilities()["version"] == "0.4.0"
