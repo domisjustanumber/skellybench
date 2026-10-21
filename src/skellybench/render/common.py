@@ -9,7 +9,10 @@ from __future__ import annotations
 import html
 import json
 from collections.abc import Iterable, Mapping, Sequence
+from dataclasses import dataclass, field
 from typing import Any
+
+from ..schema import TIMED_STAGES
 
 STYLE = """
 :root {
@@ -72,6 +75,9 @@ svg .hollow { fill: var(--bg); stroke-width: 2; }
 .legend { color: var(--muted); font-size: 12px; margin: 4px 0 8px; }
 .legend .swatch { display: inline-block; width: 10px; height: 10px; margin: 0 4px 0 12px; vertical-align: middle; }
 .muted { color: var(--muted); }
+ul.kv-list { list-style: none; margin: 0; padding: 0; }
+ul.kv-list ul.kv-list { padding-left: 16px; border-left: 1px solid var(--border); margin: 2px 0 2px 2px; }
+ul.kv-list .key { color: var(--muted); }
 """
 
 SORT_SCRIPT = """
@@ -113,6 +119,170 @@ def fmt(value: Any, digits: int = 2) -> str:
     if isinstance(value, (int, float)):
         return f"{value:.{digits}f}" if isinstance(value, float) else str(value)
     return esc(value)
+
+
+NOT_MEASURED = '<span class="muted" title="not measured">—</span>'
+"""The cell for a stage that the pass did not measure. It is never shown as 0."""
+
+
+def fmt_ms(value: Any, digits: int = 2) -> str:
+    """Format a time in ms. ``None`` (not measured) becomes "—"."""
+    if value is None:
+        return NOT_MEASURED
+    return fmt(float(value), digits)
+
+
+def _scalar_text(value: Any) -> str:
+    if value is None:
+        return "none"
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    return str(value)
+
+
+def value_html(value: Any) -> str:
+    """Render a JSON value as a readable key/value list. Nested objects are indented.
+
+    The output never holds a Python ``repr``: a list of plain values is joined with commas, and an
+    empty object or list is "none".
+    """
+    if isinstance(value, Mapping):
+        if not value:
+            return '<span class="muted">none</span>'
+        items = "".join(
+            f'<li><span class="key">{esc(key)}</span>: {value_html(item)}</li>' for key, item in value.items()
+        )
+        return f'<ul class="kv-list">{items}</ul>'
+    if isinstance(value, (list, tuple)):
+        if not value:
+            return '<span class="muted">none</span>'
+        if all(not isinstance(item, (Mapping, list, tuple)) for item in value):
+            return esc(", ".join(_scalar_text(item) for item in value))
+        return '<ul class="kv-list">' + "".join(f"<li>{value_html(item)}</li>" for item in value) + "</ul>"
+    return esc(_scalar_text(value))
+
+
+STAGE_HEADERS = ("Preprocess ms/image", "Inference ms/image", "Postprocess ms/image", "Other ms/image")
+TIMING_HEADERS = ("Images/s", "ms/image", *STAGE_HEADERS)
+
+
+@dataclass(frozen=True)
+class StageTiming:
+    """The end-to-end time of one performance record and its stage breakdown."""
+
+    images_per_second: float | None
+    ms_per_image: float | None
+    stages: dict[str, float | None]
+    other: float | None
+    providers: dict[str, str] = field(default_factory=dict)
+    """The provider of each stage that differs from the provider of the pass."""
+    excluded: dict[str, float] = field(default_factory=dict)
+
+    def cells(self) -> list[tuple[str, Any]]:
+        """Return the cells for :data:`TIMING_HEADERS`."""
+        values = [self.images_per_second, self.ms_per_image, *(self.stages[stage] for stage in TIMED_STAGES), self.other]
+        cells = [(fmt(self.images_per_second), self.images_per_second if self.images_per_second is not None else "")]
+        cells += [(fmt_ms(value), value if value is not None else "") for value in values[1:]]
+        return cells
+
+    def providers_html(self) -> str:
+        return esc("; ".join(f"{stage}: {name}" for stage, name in self.providers.items()))
+
+    def excluded_text(self) -> str:
+        return ", ".join(f"{stage} {value:.2f} ms/image" for stage, value in self.excluded.items())
+
+    def breakdown(self) -> str:
+        """Return plain text such as ``3.92 ms/image (preprocess 1.81, inference 1.51, …)``."""
+
+        def text(value: float | None) -> str:
+            return "—" if value is None else f"{value:.2f}"
+
+        parts = [f"{stage} {text(self.stages[stage])}" for stage in TIMED_STAGES] + [f"other {text(self.other)}"]
+        result = f"{text(self.ms_per_image)} ms/image ({', '.join(parts)} ms)"
+        if self.providers:
+            result += " · " + "; ".join(f"{stage} on {name}" for stage, name in self.providers.items())
+        if self.excluded:
+            result += f" · excluded: {self.excluded_text()}"
+        return result
+
+
+def provider_names(execution: Mapping[str, Any] | None) -> set[str]:
+    """Return the names of the pass's provider: EP name, key, slug, and labels."""
+    execution = execution or {}
+    provider = execution.get("provider") or {}
+    names = {provider.get(key) for key in ("ep_name", "key", "slug", "label")} | {execution.get("label")}
+    return {str(name) for name in names if name}
+
+
+def stage_timing(timing: Mapping[str, Any] | None, execution: Mapping[str, Any] | None = None) -> StageTiming:
+    """Read the stage breakdown of one ``timing`` block.
+
+    ``ms_per_image`` falls back to ``1000 / images_per_second``. "Other" is ``ms_per_image`` minus the
+    sum of the measured stages. It is ``None`` when any stage is not measured.
+    """
+    timing = timing or {}
+    ips = timing.get("images_per_second")
+    ips = float(ips) if isinstance(ips, (int, float)) and not isinstance(ips, bool) else None
+    ms = timing.get("ms_per_image")
+    if ms is None and ips:
+        ms = 1000.0 / ips
+    ms = float(ms) if ms is not None else None
+    raw = timing.get("stages_ms_per_image") or {}
+    stages = {stage: (float(raw[stage]) if raw.get(stage) is not None else None) for stage in TIMED_STAGES}
+    other = None
+    if ms is not None and all(value is not None for value in stages.values()):
+        other = ms - sum(value for value in stages.values() if value is not None)
+    own = provider_names(execution)
+    providers = {stage: str(name) for stage, name in (timing.get("stage_providers") or {}).items()
+                 if name and str(name) not in own}
+    excluded = {str(stage): float(value) for stage, value in (timing.get("excluded_ms_per_image") or {}).items()}
+    return StageTiming(ips, ms, stages, other, providers, excluded)
+
+
+def excluded_note(records: Sequence[Mapping[str, Any]], execution: Mapping[str, Any] | None = None) -> str:
+    """Return a note with the excluded stage times of each record, or an empty string."""
+    parts = []
+    for record in records:
+        text = stage_timing(record.get("timing"), execution).excluded_text()
+        if text:
+            parts.append(f"{text} ({record.get('mode')})")
+    if not parts:
+        return ""
+    return f'<p class="muted">Not in ms/image (excluded and timed separately): {esc("; ".join(parts))}.</p>'
+
+
+def dataset_line(dataset: Mapping[str, Any] | None) -> str:
+    """Return one line of HTML that names a dataset: name, split, annotation file, categories, images."""
+    if not dataset:
+        return '<span class="muted">not recorded</span>'
+    parts = [esc(dataset.get("name"))]
+    if dataset.get("split"):
+        parts.append(f"split {esc(dataset['split'])}")
+    if dataset.get("annotation_file"):
+        parts.append(f"<code>{esc(dataset['annotation_file'])}</code>")
+    else:
+        parts.append('<span class="muted">no annotations read</span>')
+    categories = dataset.get("categories")
+    if categories:
+        parts.append("categories " + esc(", ".join(f"{item.get('id')} {item.get('name')}" for item in categories)))
+    images = f"{fmt(dataset.get('images_used'))} of {fmt(dataset.get('images_available'))} images"
+    if dataset.get("selection"):
+        images += f" ({esc(dataset['selection'])})"
+    parts.append(images)
+    return " · ".join(parts)
+
+
+def stage_definitions_table(protocol: Mapping[str, Any] | None) -> str:
+    """Return the stage definitions of a protocol as a table."""
+    definitions = (protocol or {}).get("stage_definitions") or {}
+    if not definitions:
+        return '<p class="muted">The protocol defines no stages.</p>'
+    rows = [
+        [esc(mode), esc(stage), esc(text)]
+        for mode, stages in definitions.items()
+        for stage, text in stages.items()
+    ]
+    return data_table(["Mode", "Stage", "Definition"], rows)
 
 
 def fmt_bytes(size: Any) -> str:
@@ -214,18 +384,29 @@ def comparison_banner(comparison: Mapping[str, Any] | None, *, prefix: str = "")
 
 
 __all__ = [
+    "NOT_MEASURED",
     "SORT_SCRIPT",
+    "STAGE_HEADERS",
     "STYLE",
+    "TIMING_HEADERS",
+    "StageTiming",
     "cards",
     "comparison_banner",
     "data_island",
     "data_table",
+    "dataset_line",
     "esc",
+    "excluded_note",
     "fmt",
     "fmt_bytes",
+    "fmt_ms",
     "json_details",
     "kv_table",
     "link",
     "page",
     "pill",
+    "provider_names",
+    "stage_definitions_table",
+    "stage_timing",
+    "value_html",
 ]

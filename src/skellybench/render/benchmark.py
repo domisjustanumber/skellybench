@@ -7,7 +7,25 @@ from typing import Any
 
 from ..blocks import describe_container_limits
 from ..schema import COCO_STAT_KEYS
-from .common import SORT_SCRIPT, cards, data_table, esc, fmt, fmt_bytes, json_details, kv_table, link, page, pill
+from .common import (
+    SORT_SCRIPT,
+    TIMING_HEADERS,
+    cards,
+    data_table,
+    dataset_line,
+    esc,
+    excluded_note,
+    fmt,
+    fmt_bytes,
+    json_details,
+    kv_table,
+    link,
+    page,
+    pill,
+    stage_definitions_table,
+    stage_timing,
+    value_html,
+)
 
 KEY_PACKAGES = ("onnxruntime", "onnxruntime-gpu", "torch", "torchvision", "numpy", "onnx", "faster-coco-eval")
 
@@ -86,7 +104,12 @@ def host_rows(host: Mapping[str, Any]) -> list[tuple[str, str]]:
     return rows
 
 
-def _performance_table(performance: Mapping[str, Any]) -> str:
+_STAGE_NOTE = ('<p class="muted">ms/image is the end-to-end time. "Other" is ms/image minus the measured '
+               "stages. — means that the stage is not measured. The stage definitions are in the protocol "
+               "section. Stage providers show only a stage that ran on another provider than the pass.</p>")
+
+
+def _performance_table(performance: Mapping[str, Any], execution: Mapping[str, Any]) -> str:
     records = performance.get("records") or []
     if not records:
         return '<p class="muted">No measured records.</p>'
@@ -94,40 +117,34 @@ def _performance_table(performance: Mapping[str, Any]) -> str:
     for record in records:
         timing = record.get("timing") or {}
         session = record.get("session") or {}
+        stages = stage_timing(timing, execution)
         rows.append([
             esc(record.get("mode")),
             esc(record.get("timing_scope")),
-            (fmt(timing.get("images_per_second")), timing.get("images_per_second")),
-            (fmt(timing.get("ms_per_image"), 3), timing.get("ms_per_image")),
+            *stages.cells(),
+            stages.providers_html(),
             (fmt(timing.get("batch_ms_p50"), 3), timing.get("batch_ms_p50")),
             (fmt(timing.get("batch_ms_p95"), 3), timing.get("batch_ms_p95")),
             (fmt(timing.get("cv"), 4), timing.get("cv")),
             (fmt(session.get("create_ms"), 1), session.get("create_ms")),
         ])
-    return data_table(
-        ["Mode", "Timing scope", "Images/s", "ms/image", "Batch p50 ms", "Batch p95 ms", "CV", "Session create ms"],
+    table = data_table(
+        ["Mode", "Timing scope", *TIMING_HEADERS, "Stage providers", "Batch p50 ms", "Batch p95 ms", "CV",
+         "Session create ms"],
         rows,
-        numeric=(2, 3, 4, 5, 6, 7),
+        numeric=(2, 3, 4, 5, 6, 7, 9, 10, 11, 12),
     )
+    return table + excluded_note(records, execution) + _STAGE_NOTE
 
 
-def _end_to_end_table(performance: Mapping[str, Any]) -> str:
+def _end_to_end_table(performance: Mapping[str, Any], execution: Mapping[str, Any]) -> str:
+    records = performance.get("records") or []
     rows = []
-    for record in performance.get("records") or []:
-        timing = record.get("timing") or {}
-        rows.append([
-            esc(record.get("mode")),
-            fmt(timing.get("images_per_second")),
-            fmt(timing.get("preprocess_ms"), 1),
-            fmt(timing.get("inference_ms"), 1),
-            fmt(timing.get("postprocess_ms"), 1),
-            fmt(timing.get("total_ms"), 1),
-        ])
-    return data_table(
-        ["Mode", "Images/s", "Preprocess ms", "Inference ms", "Postprocess ms", "Total ms"],
-        rows,
-        numeric=(1, 2, 3, 4, 5),
-    )
+    for record in records:
+        stages = stage_timing(record.get("timing"), execution)
+        rows.append([esc(record.get("mode")), *stages.cells(), stages.providers_html()])
+    table = data_table(["Mode", *TIMING_HEADERS, "Stage providers"], rows, numeric=(1, 2, 3, 4, 5, 6))
+    return table + excluded_note(records, execution) + _STAGE_NOTE
 
 
 def render_benchmark_html(
@@ -175,8 +192,8 @@ def render_benchmark_html(
             parts.append(kv_table([
                 ("Scored with", f"{esc(metrics.get('tool'))} {esc(metrics.get('version'))}"),
                 ("Scored by", esc((accuracy.get("method") or {}).get("scored_by"))),
-                ("Decode", f"<code>{esc((accuracy.get('method') or {}).get('decode'))}</code>"),
-                ("Shared evaluation", f"<code>{esc(accuracy.get('evaluation'))}</code>"),
+                ("Decode", value_html((accuracy.get("method") or {}).get("decode"))),
+                ("Shared evaluation", value_html(accuracy.get("evaluation"))),
                 ("Predictions", link(predictions_href, predictions.get("filename"))
                  + f" — {fmt(predictions.get('record_count'))} detections"),
                 ("Predictions file SHA-256", f"<code>{esc(predictions.get('file_sha256'))}</code>"),
@@ -186,25 +203,36 @@ def render_benchmark_html(
             parts.append("<h2>End-to-end timing</h2>")
             parts.append('<p class="muted">Timing of the accuracy pass, for reference only. '
                          "Performance benchmarks give the comparable speed numbers.</p>")
-            parts.append(_end_to_end_table(report.get("performance") or {}))
+            parts.append(_end_to_end_table(report.get("performance") or {}, execution))
         else:
             parts.append("<h2>Performance</h2>")
-            parts.append(_performance_table(report.get("performance") or {}))
+            parts.append(_performance_table(report.get("performance") or {}, execution))
         unavailable = (report.get("performance") or {}).get("unavailable") or []
         if unavailable:
             parts.append("<h3>Unavailable modes</h3>")
             parts.append(data_table(["Mode", "Reason"], [[esc(item.get("mode")), esc(item.get("reason"))] for item in unavailable]))
         dataset = report.get("dataset") or {}
+        protocol = report.get("protocol") or {}
+        categories = dataset.get("categories")
+        no_annotations = '<span class="muted">none (this pass reads no annotations)</span>'
         parts.append("<h2>Dataset and protocol</h2>")
+        parts.append(f"<p>Dataset: {dataset_line(dataset)}</p>")
         parts.append(kv_table([
             ("Dataset", esc(dataset.get("name"))),
+            ("Split", esc(dataset.get("split"))),
+            ("Annotation file", f"<code>{esc(dataset['annotation_file'])}</code>" if dataset.get("annotation_file")
+             else no_annotations),
+            ("Categories", esc(", ".join(f"{item.get('id')} {item.get('name')}" for item in categories))
+             if categories else no_annotations),
             ("Images used", f"{fmt(dataset.get('images_used'))} of {fmt(dataset.get('images_available'))} ({esc(dataset.get('selection'))})"),
             ("Limit", esc(dataset.get("limit")) if dataset.get("limit") else "none"),
             ("Annotation SHA-256", f"<code>{esc(dataset.get('annotation_sha256'))}</code>"),
             ("Image list SHA-256", f"<code>{esc(dataset.get('image_list_sha256'))}</code>"),
-            ("Excluded stages", esc(", ".join((report.get("protocol") or {}).get("excluded_stages") or []) or "none")),
-            ("Protocol", f"<code>{esc(report.get('protocol'))}</code>"),
+            ("Excluded stages", esc(", ".join(protocol.get("excluded_stages") or []) or "none")),
+            ("Protocol", value_html({key: value for key, value in protocol.items() if key != "stage_definitions"})),
         ]))
+        parts.append("<h3>Stage definitions</h3>")
+        parts.append(stage_definitions_table(protocol))
 
     parts.append("<h2>Reproduce</h2>")
     parts.append(kv_table(reproduction_rows(run, report["environment"], execution)))

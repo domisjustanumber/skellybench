@@ -10,9 +10,12 @@ from typing import Any
 from .benchmark import host_rows, reproduction_rows
 from .common import (
     SORT_SCRIPT,
+    TIMING_HEADERS,
+    StageTiming,
     cards,
     comparison_banner,
     data_table,
+    dataset_line,
     esc,
     fmt,
     fmt_bytes,
@@ -20,6 +23,8 @@ from .common import (
     kv_table,
     link,
     page,
+    stage_timing,
+    value_html,
 )
 
 MODE_SHAPES = {"device": "circle", "host": "square"}
@@ -43,6 +48,8 @@ class ChartPoint:
     href: str
     newest: bool = False
     excludes: tuple[str, ...] = ()
+    timing: StageTiming | None = None
+    """The end-to-end ms/image and the stage breakdown of the record."""
 
 
 def _row_labels(benchmarks: Sequence[LinkedBenchmark]) -> dict[str, str]:
@@ -73,6 +80,7 @@ def chart_points(benchmarks: Sequence[LinkedBenchmark]) -> list[ChartPoint]:
             value = (record.get("timing") or {}).get("images_per_second")
             if not isinstance(value, (int, float)) or value <= 0:
                 continue
+            timing = stage_timing(record.get("timing"), item.payload.get("execution"))
             points.append(
                 ChartPoint(
                     row=labels[item.payload["report_id"]],
@@ -82,6 +90,7 @@ def chart_points(benchmarks: Sequence[LinkedBenchmark]) -> list[ChartPoint]:
                     hostname=str(item.payload["host"]["hostname"]),
                     href=item.href,
                     excludes=tuple((item.payload.get("protocol") or {}).get("excluded_stages") or ()),
+                    timing=timing,
                 )
             )
     newest = {}
@@ -166,6 +175,8 @@ def render_chart(points: Sequence[ChartPoint]) -> str:
         for point in sorted((p for p in points if p.row == row), key=lambda p: p.newest):
             css = f"{esc(point.mode)}{'' if point.newest else ' hollow'}"
             title = f"{point.run_id} · {point.hostname} · {point.mode} · {point.value:.2f} images/s"
+            if point.timing is not None:
+                title += f" · {point.timing.breakdown()}"
             if point.excludes:
                 title += f" · excludes: {', '.join(point.excludes)}"
             px = x(point.value)
@@ -185,6 +196,14 @@ def render_chart(points: Sequence[ChartPoint]) -> str:
     return legend + "".join(parts) + note
 
 
+def _excludes_text(point: ChartPoint) -> str:
+    if not point.excludes:
+        return "none"
+    times = point.timing.excluded if point.timing is not None else {}
+    return esc(", ".join(f"{stage} ({times[stage]:.2f} ms/image)" if stage in times else stage
+                         for stage in point.excludes))
+
+
 def _metric(snapshot: Mapping[str, Any], key: str) -> float | None:
     return (((snapshot.get("accuracy") or {}).get("metrics") or {}).get("values") or {}).get(key)
 
@@ -199,7 +218,7 @@ def _method_table(accuracy: Mapping[str, Any]) -> str:
         return [render((snapshot.get("accuracy") or {}).get("method") or {}) for _, snapshot in columns]
 
     rows = [
-        ["Decode", *cells(lambda method: f"<code>{esc(method.get('decode'))}</code>")],
+        ["Decode", *cells(lambda method: value_html(method.get("decode")))],
         ["Scorer", *cells(lambda method: f"{esc((method.get('scorer') or {}).get('tool'))} "
                                          f"{esc((method.get('scorer') or {}).get('version'))}")],
         ["Scored by", *cells(lambda method: esc(method.get("scored_by")))],
@@ -277,6 +296,7 @@ def render_model_html(
         f'<p class="subtitle">Created in run <code>{esc(report["created_run_id"])}</code> on '
         f"{esc(creation['host'].get('hostname'))}</p>"
     )
+    parts.append(f'<p class="subtitle">Accuracy dataset: {dataset_line(report.get("dataset"))}</p>')
     if superseded:
         parts.append(f'<div class="banner info">This model report is superseded. {link(current_href, "Open the current report")}.</div>')
     parts.append(comparison_banner(accuracy.get("comparison")))
@@ -302,6 +322,7 @@ def render_model_html(
     ]))
 
     parts.append("<h2>Accuracy</h2>")
+    parts.append(f"<p>Dataset: {dataset_line(report.get('dataset'))}</p>")
     if accuracy.get("parent_run_id"):
         parts.append(f'<div class="banner info">Parent pass reused from run <code>{esc(accuracy["parent_run_id"])}</code>.</div>')
     comparison = accuracy.get("comparison")
@@ -339,15 +360,18 @@ def render_model_html(
     parts.append(render_chart(points))
     if points:
         parts.append(data_table(
-            ["Device", "Mode", "Images/s", "Run", "Host", "Excludes"],
+            ["Device", "Mode", *TIMING_HEADERS, "Stage providers", "Run", "Host", "Excludes"],
             [
-                [esc(point.row), esc(point.mode), (fmt(point.value), point.value), link(point.href, point.run_id),
-                 esc(point.hostname), esc(", ".join(point.excludes)) if point.excludes else "none"]
+                [esc(point.row), esc(point.mode), *(point.timing or stage_timing(None)).cells(),
+                 (point.timing or stage_timing(None)).providers_html(), link(point.href, point.run_id),
+                 esc(point.hostname), _excludes_text(point)]
                 for point in sorted(points, key=lambda p: (p.row, p.mode, p.run_id))
             ],
             sortable=True,
-            numeric=(2,),
+            numeric=(2, 3, 4, 5, 6, 7),
         ))
+        parts.append('<p class="muted">ms/image is the end-to-end time. "Other" is ms/image minus the measured '
+                     "stages. — means that the stage is not measured. The benchmark report defines the stages.</p>")
 
     if report.get("accuracy_notes") or report.get("performance_notes"):
         parts.append("<h2>Notes</h2>")
@@ -377,7 +401,7 @@ def render_model_html(
         [
             esc(step.get("step")),
             f"{esc(step.get('tool'))} {esc(step.get('version'))}",
-            f"<code>{esc(step.get('params'))}</code>",
+            value_html(step.get("params")),
             f"<code>{esc(step.get('output_sha256'))}</code>",
         ]
         for step in creation.get("steps") or []

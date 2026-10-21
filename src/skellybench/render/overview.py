@@ -19,7 +19,19 @@ from typing import Any
 from .._internal.io import atomic_write_text
 from ..paths import href, overview_path, resolve_family_path
 from ..reports import FamilyIndex, scan_family
-from .common import SORT_SCRIPT, data_island, data_table, esc, fmt, link, page
+from .common import (
+    SORT_SCRIPT,
+    TIMING_HEADERS,
+    data_island,
+    data_table,
+    dataset_line,
+    esc,
+    fmt,
+    fmt_ms,
+    link,
+    page,
+    stage_timing,
+)
 
 ROWS_ELEMENT_ID = "overview-rows"
 
@@ -67,6 +79,7 @@ def overview_rows(index: FamilyIndex, page_path: Path) -> tuple[list[dict[str, A
                 continue
             for record in (payload.get("performance") or {}).get("records") or []:
                 timing = record.get("timing") or {}
+                stages = stage_timing(timing, execution)
                 key = (subject, host["hardware_fingerprint"], execution["label"], record.get("mode"))
                 run_id = payload["run"]["run_id"]
                 row = {
@@ -80,6 +93,12 @@ def overview_rows(index: FamilyIndex, page_path: Path) -> tuple[list[dict[str, A
                     "fingerprint": host["hardware_fingerprint"],
                     "mode": record.get("mode"),
                     "ips": timing.get("images_per_second"),
+                    "ms": stages.ms_per_image,
+                    "preprocess": stages.stages["preprocess"],
+                    "inference": stages.stages["inference"],
+                    "postprocess": stages.stages["postprocess"],
+                    "other": stages.other,
+                    "breakdown": stages.breakdown(),
                     "p50": timing.get("batch_ms_p50"),
                     "p95": timing.get("batch_ms_p95"),
                     "run_id": run_id,
@@ -274,8 +293,8 @@ OVERVIEW_SCRIPT = r"""
   function card(title, r, rule) {
     if (!r) { return '<div class="card rec"><div class="label">' + title + '</div><div class="value">none</div><div class="detail">' + rule + '</div></div>'; }
     return '<div class="card rec"><div class="label">' + title + '</div><div class="value"><a href="' + r.model_href + '">' + describe(r) +
-      '</a></div><div class="detail"><a href="' + r.performance_href + '">' + fmt(r.ips, 1) + ' images/s</a> · p50 ' + fmt(r.p50, 1) +
-      ' ms · AP ' + fmt(r.ap, 3) + '</div><div class="detail">' + rule + '</div></div>';
+      '</a></div><div class="detail"><a href="' + r.performance_href + '">' + fmt(r.ips, 1) + ' images/s</a> · ' + fmt(r.ms, 2) +
+      ' ms/image · p50 ' + fmt(r.p50, 1) + ' ms per batch · AP ' + fmt(r.ap, 3) + '</div><div class="detail">' + rule + '</div></div>';
   }
   function recommendations(list) {
     if (!list.length) { $('cards').innerHTML = '<p class="muted">No measured rows for this filter.</p>'; return; }
@@ -320,7 +339,7 @@ OVERVIEW_SCRIPT = r"""
       var onFront = front.indexOf(r) >= 0;
       var meets = isNaN(target) || (latency() ? r.p50 <= target : r.ips >= target);
       var a = el('a', { href: r.performance_href }, svg);
-      el('title', {}, a, describe(r) + ' · ' + fmt(r.ips, 1) + ' images/s · p50 ' + fmt(r.p50, 1) + ' ms · AP ' + fmt(r.ap, 3));
+      el('title', {}, a, describe(r) + ' · ' + fmt(r.ips, 1) + ' images/s · ' + r.breakdown + ' · p50 ' + fmt(r.p50, 1) + ' ms per batch · AP ' + fmt(r.ap, 3));
       var cls = 'size-' + (r.size_rank % 4) + ((onFront && meets) ? '' : ' faded');
       var cx = X(speed(r)), cy = Y(r.ap);
       if (r.precision === 'fp16') { el('polygon', { 'class': cls, points: cx + ',' + (cy - 7) + ' ' + (cx - 6) + ',' + (cy + 5) + ' ' + (cx + 6) + ',' + (cy + 5) }, a); }
@@ -341,7 +360,7 @@ OVERVIEW_SCRIPT = r"""
           var why = unavailable.filter(function (u) { return u.fingerprint === machine && u.label === labels[i] && u.size === parts[1] && u.precision === parts[2] && String(u.batch_size) === batch; })[0];
           return '<td class="cell empty" title="' + (why ? String(why.reason).replace(/"/g, '&quot;') : 'not measured') + '">' + (why ? 'unavailable' : 'not measured') + '</td>';
         }
-        return '<td class="cell' + (speed(c) === top ? ' best' : '') + '"><a href="' + c.performance_href + '">' + (latency() ? fmt(c.p50, 1) + ' ms' : fmt(c.ips, 1)) + '</a></td>';
+        return '<td class="cell' + (speed(c) === top ? ' best' : '') + '" title="' + String(c.breakdown).replace(/"/g, '&quot;') + '"><a href="' + c.performance_href + '">' + (latency() ? fmt(c.p50, 1) + ' ms per batch' : fmt(c.ips, 1)) + '</a></td>';
       }).join('') + '</tr>';
     });
     $('heatmap').innerHTML = html + '</tbody></table></div>';
@@ -364,7 +383,7 @@ OVERVIEW_SCRIPT = r"""
       var points = list.filter(function (r) { return r.size === parts[1] && r.precision === parts[2]; }).sort(function (a, b) { return a.batch_size - b.batch_size; });
       var cls = 'size-' + (Number(parts[0]) % 4);
       el('polyline', { 'class': 'line ' + cls, style: 'fill:none' + (parts[2] === 'fp16' ? ';stroke-dasharray:6 4' : ''), points: points.map(function (r) { return X(r.batch_size) + ',' + Y(speed(r)); }).join(' ') }, svg);
-      points.forEach(function (r) { var a = el('a', { href: r.performance_href }, svg); el('title', {}, a, describe(r) + ': ' + fmt(speed(r), 1));
+      points.forEach(function (r) { var a = el('a', { href: r.performance_href }, svg); el('title', {}, a, describe(r) + ': ' + fmt(speed(r), 1) + (latency() ? ' ms per batch' : ' images/s') + ' · ' + r.breakdown);
         el('circle', { 'class': cls, cx: X(r.batch_size), cy: Y(speed(r)), r: 4 }, a); });
       var last = points[points.length - 1]; el('text', { x: W - R + 8, y: Y(speed(last)) + 4 }, svg, parts[1] + ' ' + parts[2]);
     });
@@ -391,8 +410,22 @@ def _notes_marker(row: Mapping[str, Any]) -> str:
     return f' <span class="note-marker" title="{esc(chr(10).join(notes))}" aria-label="This model has notes">ⓘ</span>'
 
 
-def render_overview_html(family: str, rows: list[dict[str, Any]], unavailable: list[dict[str, Any]]) -> str:
-    """Render the family overview page."""
+def overview_datasets(index: FamilyIndex) -> list[dict[str, Any]]:
+    """Return the distinct ``dataset`` blocks of the current model reports, in report order."""
+    datasets: list[dict[str, Any]] = []
+    for model in index.models.values():
+        dataset = model.payload.get("dataset")
+        if dataset and dataset not in datasets:
+            datasets.append(dict(dataset))
+    return datasets
+
+
+def render_overview_html(family: str, rows: list[dict[str, Any]], unavailable: list[dict[str, Any]],
+                         datasets: list[dict[str, Any]] | None = None) -> str:
+    """Render the family overview page.
+
+    *datasets* are the accuracy datasets of the models. The header names each one.
+    """
     rows = [{**row, "id": index} for index, row in enumerate(rows)]
     title = f"{family} overview"
     table_rows = [
@@ -405,6 +438,8 @@ def render_overview_html(family: str, rows: list[dict[str, Any]], unavailable: l
             esc(row["host"]),
             esc(row["mode"]),
             (link(row["performance_href"], fmt(row["ips"])), row["ips"]),
+            *[(fmt_ms(row.get(key)), row.get(key) if row.get(key) is not None else "")
+              for key in ("ms", "preprocess", "inference", "postprocess", "other")],
             (fmt(row["p50"], 2), row["p50"]),
             (link(row["accuracy_href"], fmt(row["ap"], 4)), row["ap"]),
             (fmt(row["delta_ap"], 4), row["delta_ap"] if row["delta_ap"] is not None else ""),
@@ -416,6 +451,7 @@ def render_overview_html(family: str, rows: list[dict[str, Any]], unavailable: l
         f"<h1>{esc(title)}</h1>",
         '<p class="subtitle">Pick your hardware and batch size to see the fastest variant and the best '
         "accuracy/speed balance. Every mark and cell links to its benchmark report.</p>",
+        *[f'<p class="subtitle">Accuracy dataset: {dataset_line(dataset)}</p>' for dataset in datasets or []],
     ]
     if not rows:
         body.append('<p class="muted">No performance benchmarks for models with a model report yet.</p>')
@@ -448,11 +484,14 @@ def render_overview_html(family: str, rows: list[dict[str, Any]], unavailable: l
         )
     body.append("<h2>All rows</h2>")
     body.append(data_table(
-        ["Model", "Size", "Precision", "Batch", "Hardware", "Host", "Mode", "Images/s", "p50 ms", "AP", "Δ AP vs parent", "Runs"],
+        ["Model", "Size", "Precision", "Batch", "Hardware", "Host", "Mode", *TIMING_HEADERS, "p50 ms per batch",
+         "AP", "Δ AP vs parent", "Runs"],
         table_rows,
         sortable=True,
-        numeric=(3, 7, 8, 9, 10, 11),
+        numeric=(3, *range(7, 17)),
     ))
+    body.append('<p class="muted">ms/image is the end-to-end time. "Other" is ms/image minus the measured stages. '
+                "— means that the stage is not measured. p50 ms per batch is the median time of one batch.</p>")
     if unavailable:
         body.append("<h2>Unavailable benchmarks</h2>")
         body.append(data_table(
@@ -473,13 +512,14 @@ def render_family_overview(family_dir: str | Path, *, index: FamilyIndex | None 
         return None
     path = overview_path(family_dir, families[0])
     rows, unavailable = overview_rows(index, path)
-    return atomic_write_text(path, render_overview_html(families[0], rows, unavailable))
+    return atomic_write_text(path, render_overview_html(families[0], rows, unavailable, overview_datasets(index)))
 
 
 __all__ = [
     "best_for_target",
     "frontier_groups",
     "knee",
+    "overview_datasets",
     "overview_rows",
     "pareto_frontier",
     "render_family_overview",

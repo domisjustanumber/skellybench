@@ -13,7 +13,7 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
-from .common import data_island, data_table, esc, fmt, kv_table, link, page, pill
+from .common import data_island, data_table, esc, fmt, fmt_ms, kv_table, link, page, pill, stage_timing
 
 STATE_ELEMENT_ID = "run-state"
 _STATE_PATTERN = re.compile(
@@ -142,14 +142,20 @@ def render_run_summary_html(
         rows = []
         for payload, href in sorted(by_label[label], key=lambda item: item[0]["report_id"]):
             records = (payload.get("performance") or {}).get("records") or []
-            best = max((float((record.get("timing") or {}).get("images_per_second") or 0) for record in records), default=None)
-            rows.append([
-                link(href, payload["subject"]["subject_id"]),
-                pill(payload["status"]),
-                (fmt(best), best if best is not None else ""),
-                esc(payload.get("reason") or ""),
-            ])
-        parts.append(data_table(["Artifact", "Status", "Best images/s", "Reason"], rows, numeric=(2,)))
+            if not records:
+                rows.append([link(href, payload["subject"]["subject_id"]), "n/a", pill(payload["status"]),
+                             "n/a", "n/a", esc(payload.get("reason") or "")])
+            for record in records:
+                timing = stage_timing(record.get("timing"), payload.get("execution"))
+                rows.append([
+                    link(href, payload["subject"]["subject_id"]),
+                    esc(record.get("mode")),
+                    pill(payload["status"]),
+                    (fmt(timing.images_per_second), timing.images_per_second if timing.images_per_second is not None else ""),
+                    (fmt_ms(timing.ms_per_image), timing.ms_per_image if timing.ms_per_image is not None else ""),
+                    esc(payload.get("reason") or ""),
+                ])
+        parts.append(data_table(["Artifact", "Mode", "Status", "Images/s", "ms/image", "Reason"], rows, numeric=(3, 4)))
 
     unavailable = [(payload, href) for payload, href in benchmarks if payload["status"] != "measured"]
     if unavailable:
