@@ -558,6 +558,10 @@ def validate_model_report(payload: Any) -> None:
     if last_output is not None and last_output != artifact["sha256"]:
         raise _error("$.creation.steps", "the last step output_sha256 must equal $.model.artifact.sha256")
 
+    for notes_key in ("accuracy_notes", "performance_notes"):
+        if document.get(notes_key) is not None:
+            _str(document[notes_key], f"$.{notes_key}")
+
     accuracy = _mapping(document.get("accuracy"), "$.accuracy")
     self_snapshot = _validate_accuracy_entry(accuracy.get("self"), "$.accuracy.self")
     if (self_snapshot.get("subject") or {}).get("artifact", {}).get("sha256") != artifact["sha256"]:

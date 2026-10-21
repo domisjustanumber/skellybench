@@ -19,3 +19,6 @@ Plain-data API for exporters that collect data in another process.
   The validator requires it when the parent ran in another run. The model page marks a reused parent.
 - `score_columns` and `score_predictions` take `category_ids`. The scorer sets `catIds` to them.
   `ScoringResult.category_ids` holds the ids that it used.
+- Model reports take the optional `accuracy_notes` and `performance_notes`.
+  `build_model_report` has the matching arguments. The model page has a "Notes" section.
+  The family overview marks a model that has notes.

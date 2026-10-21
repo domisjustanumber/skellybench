@@ -64,6 +64,8 @@ This contract applies to every report that skellybench writes: schema version 3.
 - If the parent snapshot ran in another run than `created_run_id`, set `accuracy.parent_run_id` to the
   run id of the parent snapshot. Otherwise leave it empty.
 - Nobody compares `accuracy.method` between `self` and `parent`.
+- A model report can have `accuracy_notes` and `performance_notes`. Each one is a non-empty string.
+  Use them to explain a known difference, for example a different decode in the two passes.
 - A creation step with `input_sha256` must name the parent SHA-256.
 - The last creation step must output the artifact SHA-256.
 - Move a replaced model report to `superseded/<created_run_id>/`. Do not overwrite it.

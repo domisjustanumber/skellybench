@@ -26,7 +26,7 @@ from skellybench.render import claim_run, read_run_state, rebuild_all, render_fa
 from skellybench.schema import validate_model_report
 
 
-def _lineage(family: Path, ctx: dict | None = None, *, fp16_ap: float = 0.5):
+def _lineage(family: Path, ctx: dict | None = None, *, fp16_ap: float = 0.5, fp32_extra: dict | None = None):
     ctx = ctx or context()
     host = ctx["host"]
     checkpoint = sha("checkpoint")
@@ -40,7 +40,8 @@ def _lineage(family: Path, ctx: dict | None = None, *, fp16_ap: float = 0.5):
     write_performance(family, ctx, fp32_subject, execution(host), 120.0)
     write_performance(family, ctx, fp32_subject, execution(host, "cpu"), 15.0)
     source = source_model(ctx, source_json, family, checkpoint)
-    fp32 = onnx_model(ctx, "rfdetr-nano_b1_fp32", fp32_sha, "rfdetr-nano_source", checkpoint, fp32_json, source_json, family)
+    fp32 = onnx_model(ctx, "rfdetr-nano_b1_fp32", fp32_sha, "rfdetr-nano_source", checkpoint, fp32_json, source_json, family,
+                     **(fp32_extra or {}))
     fp16 = onnx_model(ctx, "rfdetr-nano_b1_fp16", fp16_sha, "rfdetr-nano_b1_fp32", fp32_sha, fp16_json, fp32_json, family,
                       precision="fp16", self_ap=fp16_ap)
     for report in (source, fp32, fp16):

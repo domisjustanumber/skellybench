@@ -151,6 +151,8 @@ def build_model_report(
     accuracy_parent: Mapping[str, Any] | None = None,
     comparison: Mapping[str, Any] | None = None,
     parent_run_id: str | None = None,
+    accuracy_notes: str | None = None,
+    performance_notes: str | None = None,
     generated_at: datetime | str | None = None,
 ) -> dict[str, Any]:
     """Build and validate one model report.
@@ -158,6 +160,9 @@ def build_model_report(
     Pass *parent_run_id* when the parent accuracy pass came from an earlier run than
     *created_run_id*. It must equal the parent snapshot's ``run.run_id``. Leave it ``None`` when the
     parent ran in the same run.
+
+    *accuracy_notes* and *performance_notes* are optional text for readers. A note must be a non-empty
+    string. The model page shows them, and the family overview marks the model.
     """
     payload = {
         "schema_version": SCHEMA_VERSION,
@@ -174,6 +179,9 @@ def build_model_report(
             "parent_run_id": parent_run_id,
         },
     }
+    for key, value in (("accuracy_notes", accuracy_notes), ("performance_notes", performance_notes)):
+        if value is not None:
+            payload[key] = value
     validate_model_report(payload)
     return payload
 

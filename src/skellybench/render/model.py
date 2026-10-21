@@ -342,6 +342,12 @@ def render_model_html(
             numeric=(2,),
         ))
 
+    if report.get("accuracy_notes") or report.get("performance_notes"):
+        parts.append("<h2>Notes</h2>")
+        for key, heading in (("accuracy_notes", "Accuracy"), ("performance_notes", "Performance")):
+            if report.get(key):
+                parts.append(f"<h3>{heading}</h3><p>{esc(report[key])}</p>")
+
     parts.append("<h2>Benchmark reports</h2>")
     for benchmark_type, heading in (("accuracy", "Accuracy"), ("performance", "Performance")):
         items = sorted(

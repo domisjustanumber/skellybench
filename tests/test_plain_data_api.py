@@ -211,3 +211,36 @@ def test_score_columns_takes_category_ids(tmp_path: Path) -> None:
     columns = columns_from_records(records, [1])
     assert score_columns(columns, annotation, category_ids=[1]).metrics["ap"] == pytest.approx(1.0)
     assert score_columns(columns, annotation).metrics["ap"] == pytest.approx(0.5)
+
+
+# --- change 5: notes --------------------------------------------------------------------------------
+
+from test_reports import _lineage  # noqa: E402
+
+
+def test_notes_reach_model_page_and_overview(family: Path) -> None:
+    notes = {"accuracy_notes": "The source score uses the mmdet decode.",
+             "performance_notes": "Time includes the NMS decode <fast>."}
+    lineage = _lineage(family, fp32_extra=notes)
+    assert lineage["fp32"]["accuracy_notes"] == notes["accuracy_notes"]
+    assert "accuracy_notes" not in lineage["fp16"]
+    render_family(family)
+    model_html = (family / "rfdetr-nano_b1_fp32.model.html").read_text(encoding="utf-8")
+    assert "<h2>Notes</h2>" in model_html and "mmdet decode" in model_html and "&lt;fast&gt;" in model_html
+    assert "<h2>Notes</h2>" not in (family / "rfdetr-nano_b1_fp16.model.html").read_text(encoding="utf-8")
+    overview = (family / "rfdetr.overview.html").read_text(encoding="utf-8")
+    assert overview.count('class="note-marker"') >= 1
+    assert 'title="Accuracy: The source score uses the mmdet decode.' in overview
+
+
+def test_empty_notes_are_rejected(family: Path) -> None:
+    lineage = _lineage(family)
+    from skellybench.schema import validate_model_report
+    for key in ("accuracy_notes", "performance_notes"):
+        broken = copy.deepcopy(lineage["fp32"])
+        broken[key] = ""
+        with pytest.raises(SkellybenchValidationError, match=key):
+            validate_model_report(broken)
+        broken[key] = 3
+        with pytest.raises(SkellybenchValidationError, match=key):
+            validate_model_report(broken)

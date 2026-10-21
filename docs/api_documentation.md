@@ -228,7 +228,9 @@ Set `per_image` when every image has the same count. Else set `counts`, one coun
     "parent": {"link": {…}, "snapshot": {…}},
     "comparison": {"status": "ok", "deltas": {"delta_ap": …, …}, "thresholds": {"warn_ap": 0.001, "fail_ap": 0.01}},
     "parent_run_id": null
-  }
+  },
+  "accuracy_notes": "Optional text.",
+  "performance_notes": "Optional text."
 }
 ```
 
@@ -241,6 +243,12 @@ If the run id of the parent snapshot differs from `created_run_id`, `parent_run_
 of the parent snapshot. Otherwise it must be `null` or absent.
 The model page shows "Parent pass reused from run X".
 The model page also shows the `method` of `self` and of `parent` side by side.
+
+`accuracy_notes` and `performance_notes` are optional top-level fields.
+Each one is a non-empty string when present.
+Pass them to `build_model_report(…, accuracy_notes=…, performance_notes=…)`.
+The model page shows them in a "Notes" section.
+The family overview puts a small marker next to the model. The note text is the hover text.
 
 `model.variant` lets the family overview group models of any family.
 

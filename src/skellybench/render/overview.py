@@ -89,6 +89,8 @@ def overview_rows(index: FamilyIndex, page_path: Path) -> tuple[list[dict[str, A
                     "ap75": _metric(self_snapshot, "ap75"),
                     "delta_ap": (comparison.get("deltas") or {}).get("delta_ap"),
                     "comparison": comparison.get("status"),
+                    "accuracy_notes": report.get("accuracy_notes"),
+                    "performance_notes": report.get("performance_notes"),
                     "accuracy_label": self_snapshot["execution"]["label"],
                     "performance_href": href(page_path, entry.html_path),
                     "accuracy_href": href(page_path, accuracy_page),
@@ -209,6 +211,7 @@ svg .faded { opacity: 0.25; }
 svg .frontier { fill: none; stroke: var(--muted); stroke-width: 1.5; stroke-dasharray: 4 3; }
 svg .target { stroke: var(--fail); stroke-width: 1.5; }
 svg .line { fill: none; stroke-width: 2; }
+.note-marker { cursor: help; color: var(--accent); font-size: 12px; }
 table.heat td.cell { text-align: right; font-variant-numeric: tabular-nums; }
 table.heat td.best { outline: 2px solid var(--accent); outline-offset: -2px; font-weight: 600; }
 table.heat td.empty { color: var(--muted); }
@@ -379,13 +382,22 @@ OVERVIEW_SCRIPT = r"""
 """
 
 
+def _notes_marker(row: Mapping[str, Any]) -> str:
+    """Return a small marker whose hover text holds the model notes, or an empty string."""
+    notes = [f"{label}: {row[key]}" for key, label in (("accuracy_notes", "Accuracy"), ("performance_notes", "Performance"))
+             if row.get(key)]
+    if not notes:
+        return ""
+    return f' <span class="note-marker" title="{esc(chr(10).join(notes))}" aria-label="This model has notes">ⓘ</span>'
+
+
 def render_overview_html(family: str, rows: list[dict[str, Any]], unavailable: list[dict[str, Any]]) -> str:
     """Render the family overview page."""
     rows = [{**row, "id": index} for index, row in enumerate(rows)]
     title = f"{family} overview"
     table_rows = [
         [
-            link(row["model_href"], row["subject"]),
+            (link(row["model_href"], row["subject"]) + _notes_marker(row), row["subject"]),
             esc(row["size"]),
             esc(row["precision"]),
             (esc(row["batch_size"]), row["batch_size"]),
