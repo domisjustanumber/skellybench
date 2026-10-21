@@ -33,6 +33,8 @@ COMPARISON_STATUSES = ("ok", "warn", "fail")
 SCORED_BY = ("skellybench", "source_tool")
 MODES = ("device", "host")
 TIMING_SCOPES = ("session", "end_to_end")
+TIMED_STAGES = ("preprocess", "inference", "postprocess")
+"""The stages of ``timing.stages_ms_per_image``, in pipeline order."""
 PREDICTIONS_FORMAT = "coco_detections_columnar_v1"
 
 COCO_STAT_KEYS = (
@@ -111,6 +113,17 @@ def _number(value: Any, path: str) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(float(value)):
         raise _error(path, "must be a finite number")
     return float(value)
+
+
+def _non_negative(value: Any, path: str) -> float:
+    number = _number(value, path)
+    if number < 0:
+        raise _error(path, "must be a finite number >= 0")
+    return number
+
+
+def _optional_non_negative(value: Any, path: str) -> float | None:
+    return None if value is None else _non_negative(value, path)
 
 
 def _bool(value: Any, path: str) -> bool:
@@ -301,14 +314,44 @@ def validate_dataset(dataset: Any, path: str = "dataset") -> None:
     _optional_int(block.get("limit"), f"{path}.limit", minimum=1)
 
 
+def validate_stage_definitions(
+    definitions: Any, path: str = "stage_definitions", *, excluded_stages: Sequence[str] = ()
+) -> None:
+    """Validate ``protocol.stage_definitions``: ``{mode: {stage: definition}}``.
+
+    Each key is a mode (``device`` or ``host``). Each mode defines every stage of
+    :data:`TIMED_STAGES` with a non-empty text. A mode can also define a stage of *excluded_stages*,
+    for example ``letterbox``. Other stage names are rejected. An empty object is valid.
+    """
+    block = _mapping(definitions, path)
+    allowed = (*TIMED_STAGES, *excluded_stages)
+    for mode, stages in block.items():
+        _one_of(mode, path, MODES)
+        entry = _mapping(stages, f"{path}.{mode}")
+        for stage in TIMED_STAGES:
+            if stage not in entry:
+                raise _error(f"{path}.{mode}", f"missing {stage!r}")
+        for stage, text in entry.items():
+            if stage not in allowed:
+                raise _error(f"{path}.{mode}", f"stage {stage!r} must be one of {list(allowed)}")
+            _str(text, f"{path}.{mode}.{stage}")
+
+
 def validate_protocol(protocol: Any, path: str = "protocol") -> None:
-    """Validate a ``protocol`` block. It must carry a ``protocol_id``."""
+    """Validate a ``protocol`` block. It must carry a ``protocol_id``.
+
+    ``excluded_stages`` and ``stage_definitions`` are optional. :class:`PerformanceProtocol` always
+    writes both.
+    """
     block = _mapping(protocol, path)
     _str(block.get("protocol_id"), f"{path}.protocol_id")
     _one_of(block.get("benchmark_type"), f"{path}.benchmark_type", BENCHMARK_TYPES)
     _one_of(block.get("timing_scope"), f"{path}.timing_scope", TIMING_SCOPES)
-    for index, stage in enumerate(_sequence(block.get("excluded_stages", []), f"{path}.excluded_stages")):
+    excluded = _sequence(block.get("excluded_stages", []), f"{path}.excluded_stages")
+    for index, stage in enumerate(excluded):
         _str(stage, f"{path}.excluded_stages[{index}]")
+    if "stage_definitions" in block:
+        validate_stage_definitions(block["stage_definitions"], f"{path}.stage_definitions", excluded_stages=excluded)
 
 
 def validate_metrics(metrics: Any, path: str = "metrics") -> None:
@@ -363,16 +406,71 @@ def validate_comparison(comparison: Any, path: str = "comparison") -> None:
 # --- benchmark report ------------------------------------------------------------------------------
 
 
-def _validate_performance(performance: Any, path: str = "performance") -> None:
+def _stage_mapping(value: Any, path: str) -> Mapping[str, Any]:
+    block = _mapping(value, path)
+    for stage in TIMED_STAGES:
+        if stage not in block:
+            raise _error(path, f"missing {stage!r}")
+    for stage in block:
+        if stage not in TIMED_STAGES:
+            raise _error(path, f"stage {stage!r} must be one of {list(TIMED_STAGES)}")
+    return block
+
+
+def validate_timing(
+    timing: Any, path: str = "timing", *, mode: str | None = None, protocol: Mapping[str, Any] | None = None
+) -> None:
+    """Validate the ``timing`` block of one performance record.
+
+    - ``images_per_second`` is required. ``ms_per_image`` is optional (a number >= 0).
+    - ``stages_ms_per_image`` is required: ``{preprocess, inference, postprocess}``. Each value is a
+      number >= 0, or ``null`` when the stage is not measured. The stages do not need to add up to
+      ``ms_per_image``.
+    - ``stage_providers`` is optional: the same three keys. Each value is a string or ``null``.
+    - ``excluded_ms_per_image`` is optional: a stage name to a number >= 0. Each key must be in
+      ``protocol.excluded_stages``.
+    - When a stage is measured, ``protocol.stage_definitions`` must define *mode*.
+    """
+    block = _mapping(timing, path)
+    _number(block.get("images_per_second"), f"{path}.images_per_second")
+    _optional_non_negative(block.get("ms_per_image"), f"{path}.ms_per_image")
+    if "stage_ms_per_image" in block:
+        raise _error(f"{path}.stage_ms_per_image", "is not a schema field; use stages_ms_per_image")
+    stages = _stage_mapping(block.get("stages_ms_per_image"), f"{path}.stages_ms_per_image")
+    for stage in TIMED_STAGES:
+        _optional_non_negative(stages[stage], f"{path}.stages_ms_per_image.{stage}")
+    providers = block.get("stage_providers")
+    if providers is not None:
+        providers = _stage_mapping(providers, f"{path}.stage_providers")
+        for stage in TIMED_STAGES:
+            _optional_str(providers[stage], f"{path}.stage_providers.{stage}")
+    protocol = protocol or {}
+    excluded = block.get("excluded_ms_per_image")
+    if excluded is not None:
+        allowed = list(protocol.get("excluded_stages") or [])
+        for stage, value in _mapping(excluded, f"{path}.excluded_ms_per_image").items():
+            if stage not in allowed:
+                raise _error(
+                    f"{path}.excluded_ms_per_image",
+                    f"stage {stage!r} must be in protocol.excluded_stages {allowed}",
+                )
+            _non_negative(value, f"{path}.excluded_ms_per_image.{stage}")
+    if mode is not None and any(stages[stage] is not None for stage in TIMED_STAGES):
+        if mode not in (protocol.get("stage_definitions") or {}):
+            raise _error(f"{path}.stages_ms_per_image", f"measured stages need protocol.stage_definitions.{mode}")
+
+
+def _validate_performance(
+    performance: Any, path: str = "performance", protocol: Mapping[str, Any] | None = None
+) -> None:
     block = _mapping(performance, path)
     records = _sequence(block.get("records"), f"{path}.records")
     for index, record in enumerate(records):
         entry_path = f"{path}.records[{index}]"
         entry = _mapping(record, entry_path)
-        _one_of(entry.get("mode"), f"{entry_path}.mode", MODES)
+        mode = _one_of(entry.get("mode"), f"{entry_path}.mode", MODES)
         _one_of(entry.get("timing_scope"), f"{entry_path}.timing_scope", TIMING_SCOPES)
-        timing = _mapping(entry.get("timing"), f"{entry_path}.timing")
-        _number(timing.get("images_per_second"), f"{entry_path}.timing.images_per_second")
+        validate_timing(entry.get("timing"), f"{entry_path}.timing", mode=mode, protocol=protocol)
     for index, item in enumerate(_sequence(block.get("unavailable", []), f"{path}.unavailable")):
         entry = _mapping(item, f"{path}.unavailable[{index}]")
         _str(entry.get("reason"), f"{path}.unavailable[{index}].reason")
@@ -406,7 +504,7 @@ def validate_benchmark_report(payload: Any) -> None:
         validate_protocol(document.get("protocol"), "$.protocol")
         if document["protocol"]["benchmark_type"] != benchmark_type:
             raise _error("$.protocol.benchmark_type", "must equal $.benchmark_type")
-        _validate_performance(document.get("performance"), "$.performance")
+        _validate_performance(document.get("performance"), "$.performance", document["protocol"])
         if benchmark_type == ACCURACY:
             _validate_accuracy(document.get("accuracy"), "$.accuracy")
         elif document.get("accuracy") is not None:
@@ -624,6 +722,7 @@ __all__ = [
     "SHA256_PATTERN",
     "SUBJECT_PATTERN",
     "SkellybenchValidationError",
+    "TIMED_STAGES",
     "TIMING_SCOPES",
     "payload_kind",
     "reject_local_paths",
@@ -642,5 +741,7 @@ __all__ = [
     "validate_predictions_reference",
     "validate_protocol",
     "validate_run",
+    "validate_stage_definitions",
     "validate_subject",
+    "validate_timing",
 ]

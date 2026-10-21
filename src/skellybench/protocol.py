@@ -5,10 +5,10 @@ from __future__ import annotations
 import hashlib
 import json
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
-from .schema import ACCURACY, PERFORMANCE, TIMING_SCOPES
+from .schema import ACCURACY, PERFORMANCE, TIMING_SCOPES, validate_stage_definitions
 
 
 def canonical_json(payload: Any) -> str:
@@ -19,6 +19,14 @@ def canonical_json(payload: Any) -> str:
 def fingerprint(payload: Any) -> str:
     """Return ``sha256:<hex>`` over the canonical JSON of *payload*."""
     return "sha256:" + hashlib.sha256(canonical_json(payload).encode("utf-8")).hexdigest()
+
+
+def _plain_definitions(
+    definitions: Mapping[str, Mapping[str, str]] | None, *, excluded_stages: tuple[str, ...] = ()
+) -> dict[str, dict[str, str]]:
+    """Return *definitions* as a plain ``{mode: {stage: text}}`` copy. Raise ``ValueError`` when invalid."""
+    validate_stage_definitions(definitions or {}, "stage_definitions", excluded_stages=excluded_stages)
+    return {str(mode): dict(stages) for mode, stages in (definitions or {}).items()}
 
 
 def protocol_block(params: Mapping[str, Any]) -> dict[str, Any]:
@@ -49,6 +57,12 @@ class PerformanceProtocol:
     timing_scope: str = "session"
     excluded_stages: tuple[str, ...] = ()
     """Pipeline stages that the timing leaves out, for example ``("letterbox",)``."""
+    stage_definitions: Mapping[str, Mapping[str, str]] | None = field(default=None, hash=False)
+    """What each stage of ``timing.stages_ms_per_image`` holds, per mode: ``{mode: {stage: text}}``.
+
+    Each mode defines ``preprocess``, ``inference`` and ``postprocess``. It can also define a stage of
+    *excluded_stages*. ``None`` writes an empty object.
+    """
     version: int = 1
 
     def __post_init__(self) -> None:
@@ -64,6 +78,8 @@ class PerformanceProtocol:
             raise ValueError("excluded_stages must be a sequence of stage names, not one string")
         if any(not isinstance(stage, str) or not stage for stage in self.excluded_stages):
             raise ValueError("excluded_stages must hold non-empty strings")
+        definitions = _plain_definitions(self.stage_definitions, excluded_stages=tuple(self.excluded_stages))
+        object.__setattr__(self, "stage_definitions", definitions)
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -76,6 +92,7 @@ class PerformanceProtocol:
             "cpu_threads": self.cpu_threads,
             "timing_scope": self.timing_scope,
             "excluded_stages": list(self.excluded_stages),
+            "stage_definitions": {mode: dict(stages) for mode, stages in (self.stage_definitions or {}).items()},
         }
 
     def block(self, *, batch_size: int) -> dict[str, Any]:
@@ -83,18 +100,30 @@ class PerformanceProtocol:
         return protocol_block({"benchmark_type": PERFORMANCE, "batch_size": batch_size, **self.as_dict()})
 
 
-def accuracy_protocol(*, batch_size: int, images: int, evaluation: Mapping[str, Any]) -> dict[str, Any]:
-    """Return the report ``protocol`` block for an accuracy benchmark."""
-    return protocol_block(
-        {
-            "benchmark_type": ACCURACY,
-            "version": 1,
-            "batch_size": batch_size,
-            "images": images,
-            "timing_scope": "end_to_end",
-            "evaluation": dict(evaluation),
-        }
-    )
+def accuracy_protocol(
+    *,
+    batch_size: int,
+    images: int,
+    evaluation: Mapping[str, Any],
+    stage_definitions: Mapping[str, Mapping[str, str]] | None = None,
+) -> dict[str, Any]:
+    """Return the report ``protocol`` block for an accuracy benchmark.
+
+    Pass *stage_definitions* when the timing of the pass has measured stages. The block then has
+    ``stage_definitions``, and the ``protocol_id`` covers it. Without it, the block and its
+    ``protocol_id`` do not change.
+    """
+    params: dict[str, Any] = {
+        "benchmark_type": ACCURACY,
+        "version": 1,
+        "batch_size": batch_size,
+        "images": images,
+        "timing_scope": "end_to_end",
+        "evaluation": dict(evaluation),
+    }
+    if stage_definitions is not None:
+        params["stage_definitions"] = _plain_definitions(stage_definitions)
+    return protocol_block(params)
 
 
 __all__ = [

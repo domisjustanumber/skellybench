@@ -27,6 +27,44 @@ GPU_UUID = "GPU-23465ec5-1fad-462f-0ca0-f27b67213a4b"
 EVALUATION = {"iou_type": "bbox", "max_dets": 100, "category_ids": [1]}
 METHOD = {"decode": {"score_threshold": 0.0, "num_select": 300},
           "scorer": {"tool": "faster-coco-eval", "version": "1.8.0"}, "scored_by": "skellybench"}
+_HOST_STAGES = {
+    "preprocess": "Normalization and NCHW stacking of the letterboxed batch.",
+    "inference": "session.run only. It holds the internal input and output copies of ONNX Runtime.",
+    "postprocess": "The sidecar decode: NMS, unprojection and clamping.",
+    "letterbox": "Excluded. Timed separately.",
+}
+STAGE_DEFINITIONS = {
+    "host": _HOST_STAGES,
+    "device": {
+        **_HOST_STAGES,
+        "preprocess": "Normalization and NCHW stacking of the letterboxed batch, the IO binding set-up and "
+                      "the host-to-device copy of the input.",
+        "inference": "The session run only.",
+        "postprocess": "The device-to-host copy of the outputs, then the sidecar decode.",
+    },
+}
+NULL_STAGES = {"preprocess": None, "inference": None, "postprocess": None}
+
+
+def stage_timing(ips: float, *, letterbox: bool = False, decode_provider: str | None = None) -> dict[str, Any]:
+    """Return a performance ``timing`` block whose stages leave about 5 % as "other"."""
+    ms = 1000.0 / ips
+    timing: dict[str, Any] = {
+        "images_per_second": ips,
+        "ms_per_image": ms,
+        "stages_ms_per_image": {"preprocess": 0.45 * ms, "inference": 0.4 * ms, "postprocess": 0.1 * ms},
+        "batch_ms_p50": ms,
+        "batch_ms_p95": ms * 1.1,
+    }
+    if decode_provider is not None:
+        timing["stage_providers"] = {"preprocess": None, "inference": None, "postprocess": decode_provider}
+    if letterbox:
+        timing["excluded_ms_per_image"] = {"letterbox": 0.5}
+    return timing
+
+
+def performance_protocol(**overrides: Any) -> PerformanceProtocol:
+    return PerformanceProtocol(**{"excluded_stages": ("letterbox",), "stage_definitions": STAGE_DEFINITIONS, **overrides})
 
 
 def sha(text: str) -> str:
@@ -119,7 +157,8 @@ def write_accuracy(family_dir: Path, ctx: dict[str, Any], subj: dict[str, Any], 
         benchmark_type="accuracy", status="measured", execution=exe, subject=subj, dataset=dataset(),
         protocol=accuracy_protocol(batch_size=1, images=2, evaluation=EVALUATION),
         performance={"records": [{"mode": "host", "timing_scope": "end_to_end",
-                                  "timing": {"images_per_second": 40.0, "total_ms": 50.0}}]},
+                                  "timing": {"images_per_second": 40.0, "ms_per_image": 25.0,
+                                             "stages_ms_per_image": dict(NULL_STAGES)}}]},
         accuracy={"evaluation": EVALUATION, "method": method or METHOD, "metrics": metrics(ap), "predictions": reference,
                   "pair": {"run_id": ctx["run"]["run_id"], "partner_report_id": partner or report_id}},
         **ctx,
@@ -128,13 +167,18 @@ def write_accuracy(family_dir: Path, ctx: dict[str, Any], subj: dict[str, Any], 
 
 
 def write_performance(family_dir: Path, ctx: dict[str, Any], subj: dict[str, Any], exe: dict[str, Any],
-                      ips: float = 100.0, protocol: PerformanceProtocol | None = None) -> Path:
+                      ips: float = 100.0, protocol: PerformanceProtocol | None = None,
+                      decode_provider: str | None = None) -> Path:
+    protocol = protocol or performance_protocol()
+    letterbox = "letterbox" in protocol.excluded_stages
     report = build_benchmark_report(
         benchmark_type="performance", status="measured", execution=exe, subject=subj, dataset=dataset(),
-        protocol=(protocol or PerformanceProtocol()).block(batch_size=1),
+        protocol=protocol.block(batch_size=1),
         performance={"records": [
-            {"mode": "device", "timing_scope": "session", "timing": {"images_per_second": ips}},
-            {"mode": "host", "timing_scope": "session", "timing": {"images_per_second": ips * 0.8}},
+            {"mode": "device", "timing_scope": "session",
+             "timing": stage_timing(ips, letterbox=letterbox, decode_provider=decode_provider)},
+            {"mode": "host", "timing_scope": "session",
+             "timing": stage_timing(ips * 0.8, letterbox=letterbox, decode_provider=decode_provider)},
         ]},
         **ctx,
     )

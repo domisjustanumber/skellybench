@@ -248,7 +248,7 @@ def test_empty_notes_are_rejected(family: Path) -> None:
 
 # --- change 7: excluded stages ----------------------------------------------------------------------
 
-from conftest import write_performance  # noqa: E402
+from conftest import performance_protocol, write_performance  # noqa: E402
 from skellybench.protocol import PerformanceProtocol  # noqa: E402
 
 
@@ -270,7 +270,7 @@ def test_pages_show_excluded_stages(family: Path) -> None:
 
     _lineage(family)
     later = context("20261021T090000Z-gerald")
-    protocol = PerformanceProtocol(excluded_stages=("letterbox",))
+    protocol = performance_protocol(excluded_stages=("letterbox",))
     validate_protocol(protocol.block(batch_size=1))
     broken = protocol.block(batch_size=1)
     broken["excluded_stages"] = [""]
