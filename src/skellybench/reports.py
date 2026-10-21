@@ -150,9 +150,15 @@ def build_model_report(
     accuracy_self: Mapping[str, Any],
     accuracy_parent: Mapping[str, Any] | None = None,
     comparison: Mapping[str, Any] | None = None,
+    parent_run_id: str | None = None,
     generated_at: datetime | str | None = None,
 ) -> dict[str, Any]:
-    """Build and validate one model report."""
+    """Build and validate one model report.
+
+    Pass *parent_run_id* when the parent accuracy pass came from an earlier run than
+    *created_run_id*. It must equal the parent snapshot's ``run.run_id``. Leave it ``None`` when the
+    parent ran in the same run.
+    """
     payload = {
         "schema_version": SCHEMA_VERSION,
         "kind": MODEL_REPORT_KIND,
@@ -165,6 +171,7 @@ def build_model_report(
             "self": dict(accuracy_self),
             "parent": dict(accuracy_parent) if accuracy_parent is not None else None,
             "comparison": dict(comparison) if comparison is not None else None,
+            "parent_run_id": parent_run_id,
         },
     }
     validate_model_report(payload)

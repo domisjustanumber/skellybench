@@ -66,12 +66,29 @@ def test_json_reports_are_write_once(family: Path) -> None:
         write_accuracy(family, context(), subject("rfdetr-nano_b1_fp32", sha("fp32")), execution(context()["host"]), 0.5)
 
 
-def test_pair_from_different_runs_is_rejected(family: Path) -> None:
+def test_pair_across_runs_needs_parent_run_id(family: Path) -> None:
     lineage = _lineage(family)
     broken = copy.deepcopy(lineage["fp16"])
     broken["accuracy"]["parent"]["snapshot"]["run"]["run_id"] = "20261021T000000Z-other"
-    with pytest.raises(SkellybenchValidationError, match="run.run_id"):
+    with pytest.raises(SkellybenchValidationError, match="parent_run_id"):
         validate_model_report(broken)
+    broken["accuracy"]["parent_run_id"] = "20261021T000000Z-other"
+    validate_model_report(broken)
+    broken["accuracy"]["parent_run_id"] = "20261022T000000Z-wrong"
+    with pytest.raises(SkellybenchValidationError, match="parent_run_id"):
+        validate_model_report(broken)
+
+
+def test_parent_run_id_must_be_absent_for_the_same_run(family: Path) -> None:
+    lineage = _lineage(family)
+    broken = copy.deepcopy(lineage["fp16"])
+    broken["accuracy"]["parent_run_id"] = RUN_ID
+    with pytest.raises(SkellybenchValidationError, match="parent_run_id"):
+        validate_model_report(broken)
+    source = copy.deepcopy(lineage["source"])
+    source["accuracy"]["parent_run_id"] = RUN_ID
+    with pytest.raises(SkellybenchValidationError, match="parent_run_id"):
+        validate_model_report(source)
 
 
 def test_pair_on_different_gpu_is_rejected_but_different_ep_is_accepted(family: Path) -> None:

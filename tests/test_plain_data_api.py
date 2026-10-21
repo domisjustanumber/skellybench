@@ -72,3 +72,85 @@ def test_benchmark_page_shows_collector_and_container_image() -> None:
     assert "domscott/openmmlab-exporter:df-0123456789ab" in html
     assert DIGEST in html and "published" in html
     assert "Environment collected by" not in render_benchmark_html(build_benchmark_report_with(context()["environment"]))
+
+
+# --- changes 2 and 3: method, shared evaluation and pairs across runs -----------------------------
+
+from conftest import METHOD, onnx_model, source_model, write_accuracy  # noqa: E402
+from skellybench.protocol import accuracy_protocol  # noqa: E402
+from skellybench.reports import report_id_for, write_model_report  # noqa: E402
+from skellybench.render import render_family  # noqa: E402
+from skellybench.schema import validate_benchmark_report, validate_method  # noqa: E402
+
+OLD_RUN = "20261019T100000Z-gerald"
+SOURCE_METHOD = {"decode": {"library": "mmdet", "nms": "in-library"},
+                 "scorer": {"tool": "faster-coco-eval", "version": "1.8.0"}, "scored_by": "source_tool"}
+
+
+def test_method_is_required_and_checked() -> None:
+    validate_method(METHOD, metrics_tool="faster-coco-eval")
+    with pytest.raises(SkellybenchValidationError, match="scorer.tool"):
+        validate_method(METHOD, metrics_tool="pycocotools")
+    with pytest.raises(SkellybenchValidationError, match="scored_by"):
+        validate_method({**METHOD, "scored_by": "me"})
+    with pytest.raises(SkellybenchValidationError, match="decode"):
+        validate_method({**METHOD, "decode": None})
+    assert blocks.build_accuracy_method(decode={"a": 1}, scorer_tool="t", scorer_version=None,
+                                        scored_by="skellybench")["scorer"] == {"tool": "t", "version": None}
+
+
+def test_benchmark_without_method_is_rejected(family: Path) -> None:
+    path = write_accuracy(family, context(), subject("a", sha("a")), execution(context()["host"]), 0.5)
+    from skellybench._internal.io import read_json
+    report = read_json(path)
+    validate_benchmark_report(report)
+    del report["accuracy"]["method"]
+    with pytest.raises(SkellybenchValidationError, match="method"):
+        validate_benchmark_report(report)
+    report["accuracy"]["method"] = {**METHOD, "scorer": {"tool": "other", "version": None}}
+    with pytest.raises(SkellybenchValidationError, match="metrics.tool"):
+        validate_benchmark_report(report)
+
+
+def test_protocol_id_ignores_method() -> None:
+    evaluation = {"iou_type": "bbox", "max_dets": 100, "category_ids": [1]}
+    assert accuracy_protocol(batch_size=1, images=2, evaluation=evaluation)["protocol_id"] == \
+        accuracy_protocol(batch_size=1, images=2, evaluation=dict(evaluation))["protocol_id"]
+
+
+def _reused_lineage(family: Path):
+    old, new = context(OLD_RUN), context()
+    host = new["host"]
+    checkpoint, onnx_sha = sha("checkpoint"), sha("fp32")
+    source_subject = subject("rfdetr-nano_source", checkpoint, batch_agnostic=True, fmt="pytorch_checkpoint")
+    onnx_subject = subject("rfdetr-nano_b1_fp32", onnx_sha)
+    source_json = write_accuracy(family, old, source_subject, execution(old["host"], "torch-cuda"), 0.5,
+                                 method=SOURCE_METHOD)
+    onnx_json = write_accuracy(family, new, onnx_subject, execution(host), 0.5)
+    source = source_model(old, source_json, family, checkpoint)
+    onnx = onnx_model(new, "rfdetr-nano_b1_fp32", onnx_sha, "rfdetr-nano_source", checkpoint, onnx_json,
+                      source_json, family, parent_run_id=OLD_RUN)
+    return source, onnx
+
+
+def test_pair_across_runs_with_different_methods_is_valid_and_shown(family: Path) -> None:
+    source, onnx = _reused_lineage(family)
+    assert onnx["accuracy"]["parent_run_id"] == OLD_RUN
+    assert source["accuracy"]["parent_run_id"] is None
+    write_model_report(family, source)
+    write_model_report(family, onnx)
+    render_family(family)
+    html = (family / "rfdetr-nano_b1_fp32.model.html").read_text(encoding="utf-8")
+    assert f"Parent pass reused from run <code>{OLD_RUN}</code>" in html
+    assert f"reused from run {OLD_RUN}" in html
+    assert "source_tool" in html and "skellybench" in html and "mmdet" in html
+    assert "Methods" in html
+
+
+def test_pair_still_compares_evaluation(family: Path) -> None:
+    _, onnx = _reused_lineage(family)
+    broken = copy.deepcopy(onnx)
+    broken["accuracy"]["parent"]["snapshot"]["accuracy"]["evaluation"]["category_ids"] = [1, 2]
+    from skellybench.schema import validate_model_report
+    with pytest.raises(SkellybenchValidationError, match="accuracy.evaluation"):
+        validate_model_report(broken)

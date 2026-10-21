@@ -23,6 +23,11 @@ This contract applies to every report that skellybench writes: schema version 3.
 - A subject must not contain `.`.
 - An accuracy report has COCO metrics, the end-to-end timing of the pass, and a predictions reference.
 - A performance report has no accuracy block.
+- An accuracy report has `accuracy.evaluation` and `accuracy.method`.
+  `evaluation` holds only the settings that both passes of a pair share.
+  `method` holds `decode`, `scorer` (`tool`, `version`), and `scored_by` (`skellybench` or `source_tool`).
+  `method.scorer.tool` must equal `accuracy.metrics.tool`.
+  The protocol id does not cover `method`.
 - A report with `status` other than `measured` has a `reason` and no accuracy block.
 - The `execution` block links the execution provider to the physical device.
   A GPU device carries the UUID of a `host.gpus` entry.
@@ -52,8 +57,11 @@ This contract applies to every report that skellybench writes: schema version 3.
 - A model report holds the creation record: run, host, environment, source, parent, and steps.
 - A model report holds full copies of two accuracy benchmark reports: `self` and `parent`.
   A model without a parent has `parent: null` and `comparison: null`.
-- `self` and `parent` must share the run, the dataset hashes, the batch size, the evaluation settings,
-  and the physical device. The execution provider can differ.
+- `self` and `parent` must share the dataset hashes, the batch size, `accuracy.evaluation`,
+  and the physical device. The execution provider can differ. The run can differ.
+- If the parent snapshot ran in another run than `created_run_id`, set `accuracy.parent_run_id` to the
+  run id of the parent snapshot. Otherwise leave it empty.
+- Nobody compares `accuracy.method` between `self` and `parent`.
 - A creation step with `input_sha256` must name the parent SHA-256.
 - The last creation step must output the artifact SHA-256.
 - Move a replaced model report to `superseded/<created_run_id>/`. Do not overwrite it.

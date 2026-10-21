@@ -183,12 +183,32 @@ def _metric(snapshot: Mapping[str, Any], key: str) -> float | None:
     return (((snapshot.get("accuracy") or {}).get("metrics") or {}).get("values") or {}).get(key)
 
 
+def _method_table(accuracy: Mapping[str, Any]) -> str:
+    """Return the self and parent accuracy methods side by side."""
+    columns = [("Self", accuracy["self"]["snapshot"])]
+    if accuracy.get("parent"):
+        columns.append(("Parent", accuracy["parent"]["snapshot"]))
+
+    def cells(render: Any) -> list[str]:
+        return [render((snapshot.get("accuracy") or {}).get("method") or {}) for _, snapshot in columns]
+
+    rows = [
+        ["Decode", *cells(lambda method: f"<code>{esc(method.get('decode'))}</code>")],
+        ["Scorer", *cells(lambda method: f"{esc((method.get('scorer') or {}).get('tool'))} "
+                                         f"{esc((method.get('scorer') or {}).get('version'))}")],
+        ["Scored by", *cells(lambda method: esc(method.get("scored_by")))],
+    ]
+    rows.append(["Run", *[esc(snapshot["run"]["run_id"]) for _, snapshot in columns]])
+    return data_table(["Method", *[name for name, _ in columns]], rows)
+
+
 def _accuracy_rows(
     report: Mapping[str, Any],
     benchmarks: Sequence[LinkedBenchmark],
     parent_ap_by_run: Mapping[str, float],
     parent_link: LinkedBenchmark | None,
 ) -> list[list[Any]]:
+    parent_run_id = report["accuracy"].get("parent_run_id")
     accuracy = report["accuracy"]
     self_id = accuracy["self"]["snapshot"]["report_id"]
     rows = []
@@ -199,7 +219,11 @@ def _accuracy_rows(
         snapshot = item.payload
         run_id = snapshot["run"]["run_id"]
         is_parent = parent_link is not None and item is parent_link
-        role = "parent (at creation)" if is_parent else "self (at creation)" if snapshot["report_id"] == self_id else ""
+        role = (
+            f"parent (at creation, reused from run {parent_run_id})" if is_parent and parent_run_id
+            else "parent (at creation)" if is_parent
+            else "self (at creation)" if snapshot["report_id"] == self_id else ""
+        )
         ap = _metric(snapshot, "ap")
         parent_ap = parent_ap_by_run.get(run_id)
         delta = None if is_parent or ap is None or parent_ap is None else ap - parent_ap
@@ -272,6 +296,8 @@ def render_model_html(
     ]))
 
     parts.append("<h2>Accuracy</h2>")
+    if accuracy.get("parent_run_id"):
+        parts.append(f'<div class="banner info">Parent pass reused from run <code>{esc(accuracy["parent_run_id"])}</code>.</div>')
     comparison = accuracy.get("comparison")
     if comparison:
         deltas = comparison.get("deltas") or {}
@@ -287,6 +313,11 @@ def render_model_html(
         if ancestor_comparisons:
             summary.append(("Cumulative Δ AP against the source model", fmt(cumulative, 4)))
         parts.append(kv_table(summary))
+    parts.append("<h3>Methods</h3>")
+    parts.append(_method_table(accuracy))
+    parts.append('<p class="muted">The two passes can decode and score in different ways. '
+                 "The shared evaluation settings are equal.</p>")
+    parts.append("<h3>Results</h3>")
     rows = _accuracy_rows(report, benchmarks, parent_ap_by_run or {}, parent_benchmark)
     parts.append(data_table(
         ["Run", "Host", "Device", "Subject", "AP", "AP50", "AP75", "AP small", "AP medium", "AP large", "AR100", "Δ AP vs parent"],

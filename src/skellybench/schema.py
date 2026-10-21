@@ -30,6 +30,7 @@ PERFORMANCE = "performance"
 BENCHMARK_TYPES = (ACCURACY, PERFORMANCE)
 BENCHMARK_STATUSES = ("measured", "unavailable", "error")
 COMPARISON_STATUSES = ("ok", "warn", "fail")
+SCORED_BY = ("skellybench", "source_tool")
 MODES = ("device", "host")
 TIMING_SCOPES = ("session", "end_to_end")
 PREDICTIONS_FORMAT = "coco_detections_columnar_v1"
@@ -320,6 +321,21 @@ def validate_metrics(metrics: Any, path: str = "metrics") -> None:
         _number(values[key], f"{path}.values.{key}")
 
 
+def validate_method(method: Any, path: str = "method", *, metrics_tool: str | None = None) -> None:
+    """Validate an ``accuracy.method`` block: ``{decode, scorer: {tool, version}, scored_by}``.
+
+    ``decode`` is a free-form mapping. When *metrics_tool* is given, ``scorer.tool`` must equal it.
+    """
+    block = _mapping(method, path)
+    _mapping(block.get("decode"), f"{path}.decode")
+    scorer = _mapping(block.get("scorer"), f"{path}.scorer")
+    tool = _str(scorer.get("tool"), f"{path}.scorer.tool")
+    _optional_str(scorer.get("version"), f"{path}.scorer.version")
+    _one_of(block.get("scored_by"), f"{path}.scored_by", SCORED_BY)
+    if metrics_tool is not None and tool != metrics_tool:
+        raise _error(f"{path}.scorer.tool", f"must equal accuracy.metrics.tool ({metrics_tool!r})")
+
+
 def validate_predictions_reference(reference: Any, path: str = "predictions") -> None:
     """Validate the reference to a predictions file inside an accuracy block."""
     block = _mapping(reference, path)
@@ -364,6 +380,7 @@ def _validate_accuracy(accuracy: Any, path: str = "accuracy") -> None:
     block = _mapping(accuracy, path)
     _mapping(block.get("evaluation"), f"{path}.evaluation")
     validate_metrics(block.get("metrics"), f"{path}.metrics")
+    validate_method(block.get("method"), f"{path}.method", metrics_tool=block["metrics"]["tool"])
     validate_predictions_reference(block.get("predictions"), f"{path}.predictions")
     pair = _optional_mapping(block.get("pair"), f"{path}.pair")
     if pair is not None:
@@ -452,11 +469,12 @@ def _physical_device(snapshot: Mapping[str, Any]) -> str | None:
 def validate_accuracy_pair(self_snapshot: Mapping[str, Any], parent_snapshot: Mapping[str, Any]) -> None:
     """Raise when two accuracy benchmarks are not a valid self/parent pair.
 
-    They must share the run, dataset, batch size, evaluation settings, and physical device. The EP may
-    differ (for example ``torch-cuda`` for a checkpoint and ``cuda`` for its ONNX export).
+    They must share the dataset hashes, batch size, ``accuracy.evaluation``, and physical device. The
+    runs may differ, because a model report can reuse a parent pass from an earlier run. The EP may
+    differ (for example ``torch-cuda`` for a checkpoint and ``cuda`` for its ONNX export). The
+    ``accuracy.method`` blocks may differ: nobody compares them.
     """
     checks = (
-        ("run.run_id", lambda snapshot: (snapshot.get("run") or {}).get("run_id")),
         ("dataset.annotation_sha256", lambda snapshot: (snapshot.get("dataset") or {}).get("annotation_sha256")),
         ("dataset.image_list_sha256", lambda snapshot: (snapshot.get("dataset") or {}).get("image_list_sha256")),
         ("subject.batch_size", lambda snapshot: (snapshot.get("subject") or {}).get("batch_size")),
@@ -549,12 +567,23 @@ def validate_model_report(payload: Any) -> None:
     if parent is None:
         if accuracy.get("parent") is not None or accuracy.get("comparison") is not None:
             raise _error("$.accuracy", "parent and comparison must be null for a model without a parent")
+        if accuracy.get("parent_run_id") is not None:
+            raise _error("$.accuracy.parent_run_id", "must be absent for a model without a parent")
     else:
         parent_snapshot = _validate_accuracy_entry(accuracy.get("parent"), "$.accuracy.parent")
         if parent_snapshot["subject"]["artifact"]["sha256"] != parent["sha256"]:
             raise _error("$.accuracy.parent.snapshot.subject.artifact.sha256", "must equal $.creation.parent.sha256")
         validate_accuracy_pair(self_snapshot, parent_snapshot)
         validate_comparison(accuracy.get("comparison"), "$.accuracy.comparison")
+        parent_run_id = parent_snapshot["run"]["run_id"]
+        if parent_run_id != document["created_run_id"]:
+            if accuracy.get("parent_run_id") != parent_run_id:
+                raise _error(
+                    "$.accuracy.parent_run_id",
+                    f"must equal the parent snapshot run id ({parent_run_id!r}) when it differs from $.created_run_id",
+                )
+        elif accuracy.get("parent_run_id") is not None:
+            raise _error("$.accuracy.parent_run_id", "must be absent when the parent ran in $.created_run_id")
     reject_local_paths(document)
 
 
@@ -585,6 +614,7 @@ __all__ = [
     "REPORT_KINDS",
     "RUN_ID_PATTERN",
     "SCHEMA_VERSION",
+    "SCORED_BY",
     "SHA256_PATTERN",
     "SUBJECT_PATTERN",
     "SkellybenchValidationError",
@@ -599,6 +629,7 @@ __all__ = [
     "validate_execution",
     "validate_host",
     "validate_input",
+    "validate_method",
     "validate_metrics",
     "validate_model_report",
     "validate_predictions_header",

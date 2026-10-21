@@ -36,6 +36,7 @@ report = build_benchmark_report(benchmark_type="accuracy", status="measured", ru
                                 environment=environment, execution=execution, subject=subject, dataset=…,
                                 protocol=accuracy_protocol(batch_size=1, images=5000, evaluation=…),
                                 performance=…, accuracy={"evaluation": …, "metrics": scored.as_metrics_block(),
+                                                         "method": blocks.build_accuracy_method(…),
                                                          "predictions": reference, "pair": …})
 write_benchmark_report(family_dir, report)
 
@@ -156,7 +157,8 @@ The benchmark page shows `collected_by` and the container image.
   "protocol": {"benchmark_type": "accuracy", "timing_scope": "end_to_end", "protocol_id": "…", …},
   "performance": {"records": [{"mode": "host", "timing_scope": "end_to_end", "timing": {"images_per_second": …}}]},
   "accuracy": {
-    "evaluation": {…},
+    "evaluation": {"iou_type": "bbox", "max_dets": 100, "category_ids": [1], …},
+    "method": {"decode": {…}, "scorer": {"tool": "faster-coco-eval", "version": "1.8.0"}, "scored_by": "skellybench"},
     "metrics": {"tool": "faster-coco-eval", "version": "1.8.0", "values": {"ap": …, "ap50": …, …}},
     "predictions": {"filename": "benchmarks/…/….predictions.json", "file_sha256": "…", "data_sha256": "…",
                     "format": "coco_detections_columnar_v1", "record_count": 1500000},
@@ -164,6 +166,24 @@ The benchmark page shows `collected_by` and the container image.
   }
 }
 ```
+
+### `accuracy.evaluation` and `accuracy.method`
+
+`accuracy.evaluation` holds only the settings that both passes of a pair share:
+the annotation, `category_ids`, the IoU type, `max_dets`, and the image selection.
+A model report compares `evaluation` of the two passes. They must be equal.
+
+`accuracy.method` is required. It holds the parts that belong to one pass. Nobody compares it.
+
+| Field | Meaning |
+|---|---|
+| `decode` | A free-form mapping. It says how the pass turned model output into detections. |
+| `scorer` | `{tool, version}`. `tool` must equal `accuracy.metrics.tool`. `version` can be `null`. |
+| `scored_by` | `"skellybench"` or `"source_tool"`. |
+
+`blocks.build_accuracy_method(decode=…, scorer_tool=…, scorer_version=…, scored_by=…)` builds the block.
+`ScoringResult.as_scorer_block()` gives the `scorer` part.
+The `protocol_id` of an accuracy report covers `evaluation` and does not cover `method`.
 
 A performance report has `benchmark_type: "performance"`, no `accuracy` block, and one record per
 mode (`device` or `host`). A report whose `status` is `unavailable` or `error` has a `reason`.
@@ -206,10 +226,21 @@ Set `per_image` when every image has the same count. Else set `counts`, one coun
   "accuracy": {
     "self": {"link": {"path": "benchmarks/…json", "sha256": "…"}, "snapshot": {…full benchmark report…}},
     "parent": {"link": {…}, "snapshot": {…}},
-    "comparison": {"status": "ok", "deltas": {"delta_ap": …, …}, "thresholds": {"warn_ap": 0.001, "fail_ap": 0.01}}
+    "comparison": {"status": "ok", "deltas": {"delta_ap": …, …}, "thresholds": {"warn_ap": 0.001, "fail_ap": 0.01}},
+    "parent_run_id": null
   }
 }
 ```
+
+`self` and `parent` must share the dataset hashes, the batch size, `accuracy.evaluation`, and the
+physical device. They do not need the same run.
+
+`accuracy.parent_run_id` records a reused parent pass. Call
+`build_model_report(…, parent_run_id="<run id>")` for it.
+If the run id of the parent snapshot differs from `created_run_id`, `parent_run_id` must equal the run id
+of the parent snapshot. Otherwise it must be `null` or absent.
+The model page shows "Parent pass reused from run X".
+The model page also shows the `method` of `self` and of `parent` side by side.
 
 `model.variant` lets the family overview group models of any family.
 

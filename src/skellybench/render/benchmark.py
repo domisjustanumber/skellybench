@@ -174,7 +174,9 @@ def render_benchmark_html(
             predictions = accuracy.get("predictions") or {}
             parts.append(kv_table([
                 ("Scored with", f"{esc(metrics.get('tool'))} {esc(metrics.get('version'))}"),
-                ("Evaluation", f"<code>{esc(accuracy.get('evaluation'))}</code>"),
+                ("Scored by", esc((accuracy.get("method") or {}).get("scored_by"))),
+                ("Decode", f"<code>{esc((accuracy.get('method') or {}).get('decode'))}</code>"),
+                ("Shared evaluation", f"<code>{esc(accuracy.get('evaluation'))}</code>"),
                 ("Predictions", link(predictions_href, predictions.get("filename"))
                  + f" — {fmt(predictions.get('record_count'))} detections"),
                 ("Predictions file SHA-256", f"<code>{esc(predictions.get('file_sha256'))}</code>"),

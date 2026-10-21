@@ -40,6 +40,10 @@ class ScoringResult:
     tool: str = SCORING_TOOL
     version: str = ""
 
+    def as_scorer_block(self) -> dict[str, Any]:
+        """Return the ``accuracy.method.scorer`` block: ``{tool, version}``."""
+        return {"tool": self.tool, "version": self.version}
+
     def as_metrics_block(self) -> dict[str, Any]:
         return {
             "tool": self.tool,

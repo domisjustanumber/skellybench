@@ -24,7 +24,9 @@ from skellybench.schema import COCO_STAT_KEYS
 
 RUN_ID = "20261020T153239Z-gerald"
 GPU_UUID = "GPU-23465ec5-1fad-462f-0ca0-f27b67213a4b"
-EVALUATION = {"iou_type": "bbox", "max_dets": 100, "score_threshold": 0.0, "num_select": 300}
+EVALUATION = {"iou_type": "bbox", "max_dets": 100, "category_ids": [1]}
+METHOD = {"decode": {"score_threshold": 0.0, "num_select": 300},
+          "scorer": {"tool": "faster-coco-eval", "version": "1.8.0"}, "scored_by": "skellybench"}
 
 
 def sha(text: str) -> str:
@@ -106,7 +108,7 @@ def metrics(ap: float) -> dict[str, Any]:
 
 
 def write_accuracy(family_dir: Path, ctx: dict[str, Any], subj: dict[str, Any], exe: dict[str, Any], ap: float,
-                   partner: str | None = None) -> Path:
+                   partner: str | None = None, method: dict[str, Any] | None = None) -> Path:
     from skellybench.reports import report_id_for
 
     report_id = report_id_for(subj, "accuracy", exe, ctx["run"]["run_id"])
@@ -118,7 +120,7 @@ def write_accuracy(family_dir: Path, ctx: dict[str, Any], subj: dict[str, Any], 
         protocol=accuracy_protocol(batch_size=1, images=2, evaluation=EVALUATION),
         performance={"records": [{"mode": "host", "timing_scope": "end_to_end",
                                   "timing": {"images_per_second": 40.0, "total_ms": 50.0}}]},
-        accuracy={"evaluation": EVALUATION, "metrics": metrics(ap), "predictions": reference,
+        accuracy={"evaluation": EVALUATION, "method": method or METHOD, "metrics": metrics(ap), "predictions": reference,
                   "pair": {"run_id": ctx["run"]["run_id"], "partner_report_id": partner or report_id}},
         **ctx,
     )
@@ -158,7 +160,8 @@ def source_model(ctx: dict[str, Any], accuracy_json: Path, family_dir: Path, che
 
 def onnx_model(ctx: dict[str, Any], report_id: str, artifact_sha: str, parent_id: str, parent_sha: str,
                self_json: Path, parent_json: Path, family_dir: Path, precision: str = "fp32",
-               self_ap: float = 0.5, parent_ap: float = 0.5) -> dict[str, Any]:
+               self_ap: float = 0.5, parent_ap: float = 0.5, parent_run_id: str | None = None,
+               **extra: Any) -> dict[str, Any]:
     return build_model_report(
         report_id=report_id,
         created_run_id=ctx["run"]["run_id"],
@@ -176,6 +179,8 @@ def onnx_model(ctx: dict[str, Any], report_id: str, artifact_sha: str, parent_id
         accuracy_self=accuracy_entry(family_dir, self_json),
         accuracy_parent=accuracy_entry(family_dir, parent_json),
         comparison=compare_metrics(metrics(parent_ap)["values"], metrics(self_ap)["values"]),
+        parent_run_id=parent_run_id,
+        **extra,
     )
 
 
