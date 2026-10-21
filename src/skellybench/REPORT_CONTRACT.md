@@ -93,3 +93,4 @@ This contract applies to every report that skellybench writes: schema version 3.
 - Only `probes/local.py` and `probes/docker.py` detect hardware, versions, or containers.
 - The probe files use the standard library only and do not import each other.
 - A probe that cannot run returns `None`. It does not guess.
+- `cuda_devices()` uses the CUDA driver API through `ctypes`. It does not import torch.

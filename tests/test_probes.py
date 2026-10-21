@@ -252,3 +252,95 @@ def test_not_in_a_container(tmp_path: Path) -> None:
     assert docker.is_container(root=tmp_path, system="Linux") is False
     assert docker.collect(system="Windows", registry=lambda: None) is None
     assert docker.container_runtime(system="Windows", registry=lambda: 2) == "docker"
+
+
+class _FakeCuda:
+    """A fake CUDA driver library. Each call fills the ctypes argument like the real API."""
+
+    def __init__(self, devices, *, init=0, v2=True):
+        self.devices = devices
+        self.init = init
+        if not v2:
+            self.cuDeviceGetUuid_v2 = None
+        self.calls = []
+
+    def cuInit(self, flags):
+        self.calls.append("cuInit")
+        return self.init
+
+    def cuDeviceGetCount(self, pointer):
+        pointer.contents.value = len(self.devices)
+        return 0
+
+    def cuDeviceGet(self, pointer, index):
+        pointer.contents.value = index
+        return 0
+
+    def _uuid(self, array, handle):
+        array[:] = self.devices[handle.value][0]
+        return 0
+
+    def cuDeviceGetUuid_v2(self, array, handle):
+        self.calls.append("v2")
+        return self._uuid(array, handle)
+
+    def cuDeviceGetUuid(self, array, handle):
+        self.calls.append("v1")
+        return self._uuid(array, handle)
+
+    def cuDeviceGetName(self, buffer, size, handle):
+        buffer.value = self.devices[handle.value][1].encode()
+        return 0
+
+    def cuDeviceGetPCIBusId(self, buffer, size, handle):
+        buffer.value = self.devices[handle.value][2].encode()
+        return 0
+
+
+_CUDA_DEVICES = [
+    (bytes.fromhex("23465ec51fad462f0ca0f27b67213a4b"), "NVIDIA GeForce RTX 3070", "0000:01:00.0"),
+    (bytes(range(16)), "NVIDIA RTX A2000", "0000:0A:00.0"),
+]
+
+
+def test_cuda_devices_read_uuid_name_and_bus_in_enumeration_order() -> None:
+    names = []
+
+    def loader(name):
+        names.append(name)
+        return _FakeCuda(_CUDA_DEVICES)
+
+    devices = local.cuda_devices(loader=loader, system="Windows")
+    assert names == ["nvcuda.dll"]
+    assert devices == [
+        {"cuda_index": 0, "uuid": "GPU-23465ec5-1fad-462f-0ca0-f27b67213a4b",
+         "name": "NVIDIA GeForce RTX 3070", "pci_bus_id": "0000:01:00.0"},
+        {"cuda_index": 1, "uuid": "GPU-00010203-0405-0607-0809-0a0b0c0d0e0f",
+         "name": "NVIDIA RTX A2000", "pci_bus_id": "0000:0a:00.0"},
+    ]
+    json.dumps(devices)
+    local.cuda_devices(loader=loader, system="Linux")
+    assert names[-1] == "libcuda.so.1"
+
+
+def test_cuda_devices_fall_back_to_the_v1_uuid_call() -> None:
+    fake = _FakeCuda(_CUDA_DEVICES[:1], v2=False)
+    assert local.cuda_devices(loader=lambda _: fake, system="Linux")[0]["uuid"].startswith("GPU-23465ec5")
+    assert "v1" in fake.calls and "v2" not in fake.calls
+
+
+def test_cuda_devices_return_none_without_a_driver() -> None:
+    def missing(_name):
+        raise OSError("not found")
+
+    assert local.cuda_devices(loader=missing, system="Linux") is None
+    assert local.cuda_devices(loader=lambda _: _FakeCuda([], init=100), system="Linux") is None
+    assert local.cuda_devices(loader=lambda _: object(), system="Linux") is None
+    assert local.cuda_devices(loader=lambda _: _FakeCuda(_CUDA_DEVICES), system="Darwin") is None
+    assert local.cuda_devices(loader=lambda _: _FakeCuda([]), system="Linux") == []
+
+
+def test_collect_includes_cuda_devices(tmp_path: Path) -> None:
+    result = local.collect(system="Linux", root=tmp_path, run=_runner({}), environ={},
+                           cuda_loader=lambda _: _FakeCuda(_CUDA_DEVICES[:1]))
+    assert result["cuda_devices"][0]["name"] == "NVIDIA GeForce RTX 3070"

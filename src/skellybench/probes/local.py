@@ -14,6 +14,8 @@ Public functions:
 - ``memory_total_mb()``: total physical memory. Windows, Linux, macOS.
 - ``gpus()``: GPUs with UUID, PCI bus ID, name, driver, and memory. NVIDIA through ``nvidia-smi``.
   Other adapters through WMI (Windows), ``/sys/class/drm`` (Linux), or ``system_profiler`` (macOS).
+- ``cuda_devices()``: CUDA devices in CUDA enumeration order, with index, UUID, name, and PCI bus ID.
+  Uses the CUDA driver API through ``ctypes``. No torch. Windows and Linux.
 - ``virtualization()``: WSL and virtual machine detection. Windows, Linux, macOS.
 - ``python_info()``: interpreter implementation, version, and build.
 - ``installed_packages()``: every installed distribution and its version.
@@ -986,6 +988,76 @@ def launch_command(
     return _format_command(["python", *argv[1:]])
 
 
+# --- CUDA driver API -------------------------------------------------------------------------------
+
+CudaLoader = Callable[[str], Any]
+_CUDA_NAME_BYTES = 256
+
+
+def _load_cuda_library(file_name: str, system: str) -> Any:
+    import ctypes
+
+    return ctypes.WinDLL(file_name) if system == "Windows" else ctypes.CDLL(file_name)
+
+
+def _format_cuda_uuid(raw: bytes) -> str:
+    text = raw.hex()
+    return f"GPU-{text[:8]}-{text[8:12]}-{text[12:16]}-{text[16:20]}-{text[20:]}"
+
+
+def cuda_devices(*, loader: CudaLoader | None = None, system: str | None = None) -> list[dict[str, Any]] | None:
+    """Return the CUDA devices in CUDA enumeration order, or ``None`` without a working driver.
+
+    Each entry is ``{"cuda_index", "uuid", "name", "pci_bus_id"}``. The UUID is ``"GPU-xxxxxxxx-..."``,
+    the same text as ``nvidia-smi``. The probe calls ``cuInit``, ``cuDeviceGetCount``, ``cuDeviceGet``,
+    ``cuDeviceGetUuid_v2`` (``cuDeviceGetUuid`` on an old driver), ``cuDeviceGetName`` and
+    ``cuDeviceGetPCIBusId`` from ``nvcuda.dll`` (Windows) or ``libcuda.so.1`` (Linux).
+    ``None`` means the library is missing or ``cuInit`` failed. A value that one call cannot give is
+    ``None``. The probe never raises.
+
+    Args:
+        loader: a function that takes the library file name and returns a library object. A test
+            passes a fake. The default loads the real library with ``ctypes``.
+        system: a ``platform.system()`` value.
+    """
+    import ctypes
+
+    current = _system(system)
+    if current not in ("Windows", "Linux"):
+        return None
+    file_name = "nvcuda.dll" if current == "Windows" else "libcuda.so.1"
+    try:
+        library = loader(file_name) if loader is not None else _load_cuda_library(file_name, current)
+        if library is None or library.cuInit(0) != 0:
+            return None
+        count = ctypes.c_int(0)
+        if library.cuDeviceGetCount(ctypes.pointer(count)) != 0:
+            return None
+        devices: list[dict[str, Any]] = []
+        for index in range(count.value):
+            handle = ctypes.c_int(0)
+            if library.cuDeviceGet(ctypes.pointer(handle), index) != 0:
+                devices.append({"cuda_index": index, "uuid": None, "name": None, "pci_bus_id": None})
+                continue
+            raw_uuid = (ctypes.c_ubyte * 16)()
+            uuid_call = getattr(library, "cuDeviceGetUuid_v2", None) or getattr(library, "cuDeviceGetUuid", None)
+            uuid = None
+            if uuid_call is not None and uuid_call(raw_uuid, handle) == 0:
+                uuid = _format_cuda_uuid(bytes(raw_uuid))
+            name_buffer = ctypes.create_string_buffer(_CUDA_NAME_BYTES)
+            name = None
+            if library.cuDeviceGetName(name_buffer, _CUDA_NAME_BYTES, handle) == 0:
+                name = name_buffer.value.decode("utf-8", "replace").strip() or None
+            bus_buffer = ctypes.create_string_buffer(_CUDA_NAME_BYTES)
+            bus_id = None
+            if library.cuDeviceGetPCIBusId(bus_buffer, _CUDA_NAME_BYTES, handle) == 0:
+                bus_id = bus_buffer.value.decode("ascii", "replace").strip().lower() or None
+            devices.append({"cuda_index": index, "uuid": uuid, "name": name, "pci_bus_id": bus_id})
+        return devices
+    except Exception:  # noqa: BLE001 - a probe never raises
+        return None
+
+
 # --- collect ---------------------------------------------------------------------------------------
 
 
@@ -998,6 +1070,7 @@ def collect(
     run: Runner | None = None,
     environ: Mapping[str, str] | None = None,
     windows_info: Mapping[str, Any] | None = None,
+    cuda_loader: CudaLoader | None = None,
 ) -> dict[str, Any]:
     """Run every probe in this module and return one mapping.
 
@@ -1023,6 +1096,7 @@ def collect(
         "lock_file_sha256": file_sha256(lock_file) if lock_file is not None else None,
         "command": launch_command(system=current, root=root, run=run, windows_info=info),
         "cuda_device_order": environment_variable("CUDA_DEVICE_ORDER", environ=environ),
+        "cuda_devices": cuda_devices(loader=cuda_loader, system=current),
     }
 
 
@@ -1030,6 +1104,7 @@ __all__ = [
     "DEFAULT_NATIVE_PATTERNS",
     "collect",
     "cpu_info",
+    "cuda_devices",
     "environment_variable",
     "file_sha256",
     "git_revision",

@@ -252,6 +252,23 @@ The family overview puts a small marker next to the model. The note text is the 
 
 `model.variant` lets the family overview group models of any family.
 
+## CUDA device probe
+
+`probes.local.cuda_devices()` calls the CUDA driver API through `ctypes`.
+It loads `nvcuda.dll` on Windows and `libcuda.so.1` on Linux.
+It calls `cuInit`, `cuDeviceGetCount`, `cuDeviceGet`, `cuDeviceGetUuid_v2`, `cuDeviceGetName`, and `cuDeviceGetPCIBusId`.
+
+```python
+[{"cuda_index": 0, "uuid": "GPU-23465ec5-1fad-462f-0ca0-f27b67213a4b",
+  "name": "NVIDIA GeForce RTX 3070", "pci_bus_id": "0000:01:00.0"}]
+```
+
+The list follows the CUDA enumeration order. The UUID is the same text as `nvidia-smi` gives.
+The probe returns `None` when the library is missing or `cuInit` fails. It never raises.
+Pass `loader=<function>` to replace the library loader in a test.
+`local.collect()` returns the list as `cuda_devices`.
+Use the UUID in `blocks.build_execution(..., gpu_uuid=…)` for a source pass that needs no torch.
+
 ## Category filter
 
 `score_columns(columns, annotation, category_ids=None)` and
@@ -266,6 +283,7 @@ Store them in `accuracy.evaluation.category_ids`, so that a pair compares them.
 | Function | Module | Purpose |
 |---|---|---|
 | `local.collect()`, `docker.collect()` | `probes` | Probe the machine and the container |
+| `local.cuda_devices()` | `probes` | List CUDA devices with the driver API |
 | `build_run`, `build_producer`, `build_host`, `build_environment`, `build_execution` | `blocks` | Build the shared blocks |
 | `build_external_environment` | `blocks` | Build an `environment` block that another process collected |
 | `make_run_id`, `benchmark_report_id`, `ep_slug` | `paths` | Names |

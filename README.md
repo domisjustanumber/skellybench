@@ -67,6 +67,10 @@ Each public function does one probe and returns JSON-ready data.
 A probe that cannot run returns `None` for its value.
 Each probe takes optional arguments (filesystem root, command runner, environment) so that tests can
 replace the system.
+`local.cuda_devices()` lists the CUDA devices in CUDA order, with the UUID, the name, and the PCI bus ID.
+It uses the CUDA driver API through `ctypes`, not torch.
+It returns `None` when the driver is missing.
+`local.collect()` returns it as `cuda_devices`.
 The module docstrings list every function and the platforms that it supports.
 
 In a container, set these variables, because a container cannot see its own image digest:

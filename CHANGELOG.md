@@ -22,3 +22,6 @@ Plain-data API for exporters that collect data in another process.
 - Model reports take the optional `accuracy_notes` and `performance_notes`.
   `build_model_report` has the matching arguments. The model page has a "Notes" section.
   The family overview marks a model that has notes.
+- Add `probes.local.cuda_devices()`. It uses the CUDA driver API through `ctypes` and returns
+  `[{cuda_index, uuid, name, pci_bus_id}]`, or `None` without a driver. `local.collect()` includes it as
+  `cuda_devices`.
