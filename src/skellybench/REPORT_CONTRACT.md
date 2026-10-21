@@ -31,6 +31,19 @@ This contract applies to every report that skellybench writes: schema version 3.
 - A report with `status` other than `measured` has a `reason` and no accuracy block.
 - A performance protocol has `excluded_stages`: the pipeline stages that the timing leaves out.
   The list is part of the protocol id. The pages show it.
+- A performance protocol has `stage_definitions`: `{mode: {stage: text}}`. Each mode defines
+  `preprocess`, `inference` and `postprocess`. A mode can also define an excluded stage.
+  The definitions are part of the protocol id. Define each stage boundary once, so that a stage name
+  means the same work for every provider.
+- Each performance record has `timing.stages_ms_per_image` with `preprocess`, `inference` and
+  `postprocess`. Each value is a number >= 0, or `null` when the pass did not measure the stage.
+  Do not make up a split. The stages do not need to add up to `ms_per_image`.
+- A measured stage needs `protocol.stage_definitions` for the mode of its record.
+- `timing.stage_providers` is optional. It names the execution provider of each stage.
+- `timing.excluded_ms_per_image` is optional. Its keys must be in `protocol.excluded_stages`.
+- The dataset block of an accuracy report has `annotation_file`, `categories` (`[{id, name}]`) and
+  `annotation_sha256`. A performance report reads no annotations. Set these three fields to `null`.
+  Do not invent values.
 - The `execution` block links the execution provider to the physical device.
   A GPU device carries the UUID of a `host.gpus` entry.
 
@@ -59,6 +72,9 @@ This contract applies to every report that skellybench writes: schema version 3.
 
 - Write one model report for each model artifact, when the model is created.
 - A model report holds the creation record: run, host, environment, source, parent, and steps.
+- A model report has a top-level `dataset` block from its own accuracy pass. It has `split`,
+  `annotation_file` and `categories`. Each key that it shares with the dataset of `accuracy.self`
+  must be equal.
 - A model report holds full copies of two accuracy benchmark reports: `self` and `parent`.
   A model without a parent has `parent: null` and `comparison: null`.
 - `self` and `parent` must share the dataset hashes, the batch size, `accuracy.evaluation`,

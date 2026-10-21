@@ -34,11 +34,23 @@ reference = write_benchmark_predictions(family_dir, subject_id=subject["subject_
 scored = score_columns(read_predictions_file(family_dir / reference["filename"]), annotation_file)
 report = build_benchmark_report(benchmark_type="accuracy", status="measured", run=run, host=host,
                                 environment=environment, execution=execution, subject=subject, dataset=…,
-                                protocol=accuracy_protocol(batch_size=1, images=5000, evaluation=…),
+                                protocol=accuracy_protocol(batch_size=1, images=5000, evaluation=…,
+                                                           stage_definitions=…),
                                 performance=…, accuracy={"evaluation": …, "metrics": scored.as_metrics_block(),
                                                          "method": blocks.build_accuracy_method(…),
                                                          "predictions": reference, "pair": …})
 write_benchmark_report(family_dir, report)
+
+# Performance: one record per mode, with the stage breakdown.
+protocol = PerformanceProtocol(excluded_stages=("letterbox",), stage_definitions=…)
+report = build_benchmark_report(benchmark_type="performance", status="measured", …,
+                                protocol=protocol.block(batch_size=1), performance={"records": […]})
+write_benchmark_report(family_dir, report)
+
+# Model: the dataset block comes from the dataset of accuracy.self.
+model = build_model_report(report_id=…, created_run_id=run_id, model=…, creation=…,
+                           accuracy_self=accuracy_entry(family_dir, self_json), …)
+write_model_report(family_dir, model)
 
 render_family(family_dir)
 write_run_summary(exports_root, {"run_id": run_id, "status": "finished", …})
@@ -152,10 +164,13 @@ The benchmark page shows `collected_by` and the container image.
               "format": "onnx", "precision": "fp32", "batch_size": 1, "batch_agnostic": false,
               "artifact": {"filename": "rfdetr-nano_b1_fp32.onnx", "sha256": "…", "size_bytes": 107824324},
               "input": {"width": 384, "height": 384}},
-  "dataset": {"name": "coco-val2017", "annotation_sha256": "…", "image_list_sha256": "…",
+  "dataset": {"name": "coco-val2017", "split": "val2017", "annotation_file": "instances_val2017.json",
+              "categories": [{"id": 1, "name": "person"}], "annotation_sha256": "…", "image_list_sha256": "…",
               "images_available": 5000, "images_used": 5000, "selection": "all", "limit": null},
   "protocol": {"benchmark_type": "accuracy", "timing_scope": "end_to_end", "protocol_id": "…", …},
-  "performance": {"records": [{"mode": "host", "timing_scope": "end_to_end", "timing": {"images_per_second": …}}]},
+  "performance": {"records": [{"mode": "host", "timing_scope": "end_to_end",
+                               "timing": {"images_per_second": …, "ms_per_image": …,
+                                          "stages_ms_per_image": {"preprocess": …, "inference": …, "postprocess": …}}}]},
   "accuracy": {
     "evaluation": {"iou_type": "bbox", "max_dets": 100, "category_ids": [1], …},
     "method": {"decode": {…}, "scorer": {"tool": "faster-coco-eval", "version": "1.8.0"}, "scored_by": "skellybench"},
@@ -188,6 +203,63 @@ The `protocol_id` of an accuracy report covers `evaluation` and does not cover `
 A performance report has `benchmark_type: "performance"`, no `accuracy` block, and one record per
 mode (`device` or `host`). A report whose `status` is `unavailable` or `error` has a `reason`.
 
+### `dataset`
+
+| Field | Accuracy report | Performance report |
+|---|---|---|
+| `name` | Required. For example `"coco-val2017"`. | Required. |
+| `split` | Optional. For example `"val2017"`. A model report needs it. | Optional. |
+| `annotation_file` | Required. The file name, for example `"instances_val2017.json"`. | `null` or absent. |
+| `categories` | Required. A non-empty list of `{id, name}` with unique ids. | `null` or absent. |
+| `annotation_sha256` | Required. | `null` or absent. |
+| `image_list_sha256` | Required. | Required. |
+| `images_used`, `images_available` | Required (`images_available` can be `null`). | The same. |
+| `selection`, `limit` | `selection` is required. `limit` can be `null`. | The same. |
+
+A performance pass reads no annotations. It states only the image source: the image set, the selection
+(for example `"stride sample of 120"`) and the image list hash. Do not invent annotation values.
+When a performance report has `annotation_file` or `categories`, the validator checks them.
+
+### Performance timing
+
+Each record of `performance.records` has a `timing` block. This also applies to the record of an
+accuracy report.
+
+```json
+{
+  "mode": "device",
+  "timing_scope": "end_to_end",
+  "timing": {
+    "images_per_second": 255.1,
+    "ms_per_image": 3.92,
+    "stages_ms_per_image": {"preprocess": 1.81, "inference": 1.51, "postprocess": 0.28},
+    "stage_providers": {"preprocess": null, "inference": "CUDAExecutionProvider", "postprocess": "CUDAExecutionProvider"},
+    "excluded_ms_per_image": {"letterbox": 0.85},
+    "batch_ms_p50": 11.8, "batch_ms_p95": 12.4, "cv": 0.01
+  }
+}
+```
+
+| Field | Rule |
+|---|---|
+| `images_per_second` | Required. A finite number. |
+| `ms_per_image` | Optional. A number >= 0. It is the end-to-end time. |
+| `stages_ms_per_image` | Required. Exactly `preprocess`, `inference` and `postprocess`. Each value is a number >= 0, or `null` when the pass did not measure the stage. |
+| `stage_providers` | Optional. Exactly the same three keys. Each value is a string (the execution provider name) or `null`. |
+| `excluded_ms_per_image` | Optional. A stage name to a number >= 0. Each key must be in `protocol.excluded_stages`. |
+
+The stages do not need to add up to `ms_per_image`. The pages show the rest as "other":
+`ms_per_image` minus the sum of the stages. "Other" is blank when a stage is `null`.
+A pass that has no breakdown, for example a source pass that `tools/test.py` times as one wall time,
+writes `null` for each stage. Do not make up a split.
+
+```json
+{"images_per_second": 41.7, "stages_ms_per_image": {"preprocess": null, "inference": null, "postprocess": null}}
+```
+
+When a record has a measured stage, `protocol.stage_definitions` must define the mode of the record.
+The validator rejects the old key `stage_ms_per_image`.
+
 ## Predictions file
 
 ```json
@@ -215,6 +287,9 @@ Set `per_image` when every image has the same count. Else set `counts`, one coun
             "variant": {"family": "rfdetr", "size": "nano", "size_rank": 0, "precision": "fp16", "batch_size": 1},
             "input": {"width": 384, "height": 384}, "outputs": […],
             "artifact": {"filename": "rfdetr-nano_b1_fp16.onnx", "sha256": "…", "size_bytes": …}, "decode": {…}},
+  "dataset": {"name": "coco-val2017", "split": "val2017", "annotation_file": "instances_val2017.json",
+              "categories": [{"id": 1, "name": "person"}], "images_used": 5000, "images_available": 5000,
+              "selection": "all", "limit": null, "annotation_sha256": "…", "image_list_sha256": "…"},
   "creation": {
     "run": {…}, "host": {…}, "environment": {…},
     "source": {"kind": "checkpoint", "filename": "rf-detr-nano.pth", "url": "https://…", "md5": "…", "sha256": "…"},
@@ -261,6 +336,68 @@ The list is part of the protocol parameters, so it changes `protocol_id`.
 The validator checks that every entry is a non-empty string.
 The model page shows "excludes: letterbox" under the performance chart and in the performance table.
 The benchmark page shows the excluded stages in the protocol section.
+Record the time of an excluded stage in `timing.excluded_ms_per_image`. The pages show it as a note.
+
+## Stage definitions
+
+`protocol.stage_definitions` says which work each stage holds. The shape is
+`stage_definitions[mode][stage]`, because the mode changes where the device copies happen.
+The modes are the record modes: `device` and `host`.
+
+```python
+STAGE_DEFINITIONS = {
+    "device": {
+        "preprocess": "Normalization and NCHW stacking of the letterboxed batch, the IO binding set-up, "
+                      "and the host-to-device copy of the input.",
+        "inference": "The session run only.",
+        "postprocess": "The device-to-host copy of the outputs, then the sidecar decode "
+                       "(NMS, unprojection, clamping).",
+        "letterbox": "Excluded. Timed separately.",
+    },
+    "host": {
+        "preprocess": "Normalization and NCHW stacking of the letterboxed batch.",
+        "inference": "session.run only. It also holds the internal input and output copies of ONNX Runtime.",
+        "postprocess": "The sidecar decode (NMS, unprojection, clamping).",
+        "letterbox": "Excluded. Timed separately.",
+    },
+}
+protocol = PerformanceProtocol(excluded_stages=("letterbox",), stage_definitions=STAGE_DEFINITIONS)
+```
+
+Rules:
+
+- Each mode defines `preprocess`, `inference` and `postprocess` with a non-empty text.
+- A mode can also define a stage of `excluded_stages`, for example `letterbox`. Other stage names fail.
+- A mode key must be `device` or `host`.
+- `PerformanceProtocol` always writes `stage_definitions`. It is `{}` when you give no definitions.
+- The definitions are part of `protocol_id`. A change of one text changes the id.
+- `accuracy_protocol(…, stage_definitions=…)` takes the same shape. Without it, the accuracy block has no
+  `stage_definitions` and its `protocol_id` does not change.
+
+The benchmark page shows the definitions in a table.
+
+## Model report dataset
+
+A model report has a top-level `dataset` block. It comes from its own accuracy pass (`accuracy.self`):
+
+```json
+{
+  "name": "coco-val2017", "split": "val2017", "annotation_file": "instances_val2017.json",
+  "categories": [{"id": 1, "name": "person"}],
+  "images_used": 5000, "images_available": 5000, "selection": "all", "limit": null,
+  "annotation_sha256": "…", "image_list_sha256": "…"
+}
+```
+
+- `split`, `annotation_file` and `categories` are required.
+- Only the keys above are allowed.
+- Each key that the block shares with the dataset of `accuracy.self` must be equal.
+- `build_model_report(…, dataset=None)` builds the block from the dataset of `accuracy.self` with
+  `blocks.build_model_dataset(snapshot_dataset, **overrides)`. Put `split` in the dataset of the accuracy
+  pass, or pass `dataset=blocks.build_model_dataset(…, split="val2017")`.
+
+The model page shows the dataset in the header and in the accuracy section.
+The family overview shows each dataset of its models in the header.
 
 ## CUDA device probe
 
@@ -288,6 +425,19 @@ It raises `ScoringError` when the list is empty or holds an id that is not in th
 `ScoringResult.category_ids` holds the ids that the scorer used.
 Store them in `accuracy.evaluation.category_ids`, so that a pair compares them.
 
+## Pages
+
+| Page | Performance | Dataset |
+|---|---|---|
+| Benchmark page | Images/s, ms/image, the three stages, "other", stage providers that differ from the pass, the excluded time, and the stage definitions | Name, split, annotation file, categories, images, hashes |
+| Model page | The same columns in the performance table and in the chart hover text | A line in the header and in the accuracy section |
+| Family overview | Images/s, ms/image, the stages and "other" in "All rows". The hover text has the breakdown. The batch latency is "p50 ms per batch". | A line in the header for each dataset |
+| Run summary | Images/s and ms/image for each artifact and mode | — |
+
+A stage that is not measured shows "—", never 0.
+The pages show `decode`, `accuracy.evaluation`, the protocol and the step parameters as key/value lists.
+Nested blocks, for example `nms`, are indented.
+
 ## API
 
 | Function | Module | Purpose |
@@ -297,7 +447,9 @@ Store them in `accuracy.evaluation.category_ids`, so that a pair compares them.
 | `build_run`, `build_producer`, `build_host`, `build_environment`, `build_execution` | `blocks` | Build the shared blocks |
 | `build_external_environment` | `blocks` | Build an `environment` block that another process collected |
 | `make_run_id`, `benchmark_report_id`, `ep_slug` | `paths` | Names |
-| `PerformanceProtocol`, `accuracy_protocol` | `protocol` | Protocol blocks with stable IDs |
+| `PerformanceProtocol`, `accuracy_protocol` | `protocol` | Protocol blocks with stable IDs. Both take `stage_definitions`. |
+| `build_model_dataset` | `blocks` | Build the model report `dataset` block from the dataset of an accuracy pass |
+| `validate_timing`, `validate_stage_definitions`, `validate_dataset`, `validate_model_dataset` | `schema` | Validate one timing block, the stage definitions, or a dataset block |
 | `encode_columns`, `columns_from_records`, `read_predictions_file` | `predictions` | Predictions files |
 | `score_columns`, `score_predictions`, `compare_metrics` | `scoring` | COCO metrics and comparisons. Both scorers take `category_ids`. |
 | `build_benchmark_report`, `write_benchmark_predictions`, `write_benchmark_report` | `reports` | Benchmark reports |

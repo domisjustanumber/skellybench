@@ -89,8 +89,11 @@ python -m skellybench capabilities --format text
 ```
 
 The JSON lists the features of this version. Check one with `skellybench.supports("pairs.cross_run")`.
-Version 0.3.0 reports `environment.external`, `accuracy.method`, `pairs.cross_run`,
+Version 0.3.0 added `environment.external`, `accuracy.method`, `pairs.cross_run`,
 `scoring.category_ids`, `model_report.notes`, `probes.cuda_devices`, and `protocol.excluded_stages`.
+Version 0.4.0 added `performance.stage_timings`, `performance.stage_providers`,
+`performance.excluded_ms_per_image`, `protocol.stage_definitions`, `dataset.annotation_file`,
+`dataset.categories`, `model_report.dataset`, `render.stage_breakdown`, and `render.key_value_blocks`.
 
 ## Development
 
